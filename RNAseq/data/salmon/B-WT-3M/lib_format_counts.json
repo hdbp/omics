@@ -1,0 +1,22 @@
+{
+    "read_files": "[ ./trimmed/MAW-Lane1-6_R1_001.fastq.gz, ./trimmed/MAW-Lane1-6_R2_001.fastq.gz]",
+    "expected_format": "IU",
+    "compatible_fragment_ratio": 1.0,
+    "num_compatible_fragments": 5700121,
+    "num_assigned_fragments": 5700121,
+    "num_frags_with_concordant_consistent_mappings": 5538803,
+    "num_frags_with_inconsistent_or_orphan_mappings": 300215,
+    "strand_mapping_bias": 0.4988843257288624,
+    "MSF": 0,
+    "OSF": 0,
+    "ISF": 2763222,
+    "MSR": 0,
+    "OSR": 0,
+    "ISR": 2775581,
+    "SF": 148448,
+    "SR": 151767,
+    "MU": 0,
+    "OU": 0,
+    "IU": 0,
+    "U": 0
+}

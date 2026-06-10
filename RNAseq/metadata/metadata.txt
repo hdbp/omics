@@ -1,0 +1,17 @@
+sample_name	condition	cell_type	sex	organ	files
+B-WT-2M	WT	B-Cell	M	PB	../data/salmon/B-WT-2M/quant.sf
+B-WT-3M	WT	B-Cell	M	PB	../data/salmon/B-WT-3M/quant.sf
+B-cTKO-3M	cTKO	B-Cell	M	PB	../data/salmon/B-cTKO-3M/quant.sf
+B-cTKO-6M	cTKO	B-Cell	M	PB	../data/salmon/B-cTKO-6M/quant.sf
+CD4-WT-1F	WT	CD4	F	Sp	../data/salmon/CD4-WT-1F/quant.sf
+CD4-WT-2M	WT	CD4	M	Sp	../data/salmon/CD4-WT-2M/quant.sf
+CD4-WT-3M	WT	CD4	M	Sp	../data/salmon/CD4-WT-3M/quant.sf
+CD4-WT-4M	WT	CD4	M	Sp	../data/salmon/CD4-WT-4M/quant.sf
+CD4-cTKO-3M	cTKO	CD4	M	Sp	../data/salmon/CD4-cTKO-3M/quant.sf
+CD4-cTKO-5F	cTKO	CD4	F	Sp	../data/salmon/CD4-cTKO-5F/quant.sf
+CD4-cTKO-6M	cTKO	CD4	M	Sp	../data/salmon/CD4-cTKO-6M/quant.sf
+CD4-cTKO-10M	cTKO	CD4	M	Sp	../data/salmon/CD4-cTKO-10M/quant.sf
+CD8-WT-1F	WT	CD8	F	Sp	../data/salmon/CD8-WT-1F/quant.sf
+CD8-WT-4M	WT	CD8	M	Sp	../data/salmon/CD8-WT-4M/quant.sf
+CD8-cTKO-5F	cTKO	CD8	F	Sp	../data/salmon/CD8-cTKO-5F/quant.sf
+CD8-cTKO-10M	cTKO	CD8	M	Sp	../data/salmon/CD8-cTKO-10M/quant.sf

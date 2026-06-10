@@ -1,0 +1,13 @@
+path	sample_name	condition	replicate	assay
+../data/WT_H3K27me3_rep1_R1_trimmed.fastq.sorted.bam	WT_H3K27me3_rep1	WT	1	H3K27me3
+../data/WT_H3K27me3_rep2_R1_trimmed.fastq.sorted.bam	WT_H3K27me3_rep2	WT	2	H3K27me3
+../data/WT_H3K36me2_rep1_R1_trimmed.fastq.sorted.bam	WT_H3K36me2_rep1	WT	1	H3K36me2
+../data/WT_H3K36me2_rep2_R1_trimmed.fastq.sorted.bam	WT_H3K36me2_rep2	WT	2	H3K36me2
+../data/WT_Input_rep1_R1_trimmed.fastq.sorted.bam	WT_Input_rep1	WT	1	Input
+../data/WT_Input_rep2_R1_trimmed.fastq.sorted.bam	WT_Input_rep2	WT	2	Input
+../data/cTKO_H3K27me3_rep1_R1_trimmed.fastq.sorted.bam	cTKO_H3K27me3_rep1	cTKO	1	H3K27me3
+../data/cTKO_H3K27me3_rep2_R1_trimmed.fastq.sorted.bam	cTKO_H3K27me3_rep2	cTKO	2	H3K27me3
+../data/cTKO_H3K36me2_rep1_R1_trimmed.fastq.sorted.bam	cTKO_H3K36me2_rep1	cTKO	1	H3K36me2
+../data/cTKO_H3K36me2_rep2_R1_trimmed.fastq.sorted.bam	cTKO_H3K36me2_rep2	cTKO	2	H3K36me2
+../data/cTKO_Input_rep1_R1_trimmed.fastq.sorted.bam	cTKO_Input_rep1	cTKO	1	Input
+../data/cTKO_Input_rep2_R1_trimmed.fastq.sorted.bam	cTKO_Input_rep2	cTKO	2	Input

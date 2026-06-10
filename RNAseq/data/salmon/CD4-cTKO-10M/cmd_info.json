@@ -1,0 +1,11 @@
+{
+    "salmon_version": "1.10.2",
+    "index": "/home/hugo/Data/genomes/alias/mm10/salmon_sa_index/default/.",
+    "libType": "A",
+    "mates1": "./trimmed/MAW-Lane2-4_R1_001.fastq.gz",
+    "mates2": "./trimmed/MAW-Lane2-4_R2_001.fastq.gz",
+    "output": "./salmon/CD4-cTKO-10M",
+    "validateMappings": [],
+    "threads": "12",
+    "auxDir": "aux_info"
+}
