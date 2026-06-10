@@ -1,0 +1,53 @@
+Package: GenomicUtils
+Type: Package
+Title: Utilities for Chromatin, Nucleosome, and Transcriptome Analysis
+Version: 0.1.0
+Authors@R:
+    person(given = "Hugo",
+           family = "Pinto",
+           email = "hugo_danielbp@me.com",
+           role = c("aut", "cre"))
+Description: Streamlined tools for genomic data analysis including
+    FFT-based NRL computation, chunked AUC analysis, stranded coverage visualization,
+    and ENCODE data import utilities.
+Depends:
+    R (>= 4.3)
+Imports:
+    S4Vectors,
+    AnnotationDbi,
+    ATACseqQC,
+    BiocGenerics,
+    BRGenomics,
+    ChIPseeker,
+    dplyr,
+    GenomicAlignments,
+    GenomicFeatures,
+    GenomicRanges,
+    GenomeInfoDb,
+    ggplot2,
+    gridExtra,
+    httr,
+    IRanges,
+    org.Hs.eg.db,
+    org.Mm.eg.db,
+    patchwork,
+    Rsamtools,
+    rstatix,
+    rtracklayer,
+    tidyGenomeBrowser,
+    TxDb.Hsapiens.UCSC.hg38.knownGene,
+    TxDb.Mmusculus.UCSC.mm10.knownGene,
+    tidyr,
+    zoo,
+    readr
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Suggests:
+    BSgenome.Hsapiens.UCSC.hg38,
+    ENCODExplorer,
+    testthat (>= 3.0.0),
+    MASS
+Config/testthat/edition: 3
