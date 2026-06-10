@@ -6,6 +6,7 @@ Based on data from:
 
 > Willcockson MA, Healton SE, Weiss CN, et al. **H1 histones control the epigenetic landscape by local chromatin compaction.** *Nature* 589, 293–298 (2021). https://doi.org/10.1038/s41586-020-3032-z
 
+GEO Accession: GSE141187
 ---
 
 ## Workspace structure
