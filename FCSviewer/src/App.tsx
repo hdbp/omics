@@ -3,7 +3,7 @@ import { useStore, getActiveSample } from './state/store';
 import { FileLoader } from './components/FileLoader';
 import { SampleList } from './components/SampleList';
 import { GateTree } from './components/GateTree';
-import { PlotCanvas } from './components/PlotCanvas';
+import { PanelWorkspace } from './components/PanelWorkspace';
 import { StatsTable } from './components/StatsTable';
 import { computeGateStats } from './gating/gateStats';
 import './App.css';
@@ -36,7 +36,7 @@ function App() {
         <main className="main-content">
           {sample ? (
             <>
-              <PlotCanvas sample={sample} />
+              <PanelWorkspace sample={sample} />
               <StatsTable sample={sample} stats={stats} />
             </>
           ) : (

@@ -232,40 +232,131 @@
   gap: 4px;
 }
 
-/* Plot panel */
-.plot-panel {
+/* Panel workspace (the multi-plot canvas that replaces a single plot view) */
+.panel-workspace-wrap {
   display: flex;
   flex-direction: column;
   border: 1px solid #2e303a;
   border-radius: 6px;
-  background: #1a1b22;
-  flex: 1 1 55%;
-  min-height: 320px;
+  background: #101116;
+  flex: 1 1 60%;
+  min-height: 380px;
   overflow: hidden;
 }
+.panel-workspace-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #2e303a;
+  background: #1a1b22;
+}
+.workspace-title {
+  font-size: 12px;
+  color: #8b93a1;
+}
+.panel-workspace-scroll {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+.panel-workspace-canvas {
+  position: relative;
+}
+.panel-connectors {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+/* A single plot panel within the workspace */
+.gate-panel {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: #1a1b22;
+  border: 1px solid #2e303a;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.gate-panel-focused {
+  border-color: #2ee6a6;
+  box-shadow: 0 0 0 2px rgba(46, 230, 166, 0.45);
+}
+.gate-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #20222b;
+  border-bottom: 1px solid #2e303a;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: grab;
+  user-select: none;
+}
+.gate-panel-header:active {
+  cursor: grabbing;
+}
+.gate-panel-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gate-panel-close {
+  background: none;
+  border: none;
+  color: #8b93a1;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.gate-panel-close:hover {
+  color: #ff6b6b;
+}
+.gate-panel-path {
+  font-size: 10px;
+  color: #6b7280;
+  padding: 2px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .plot-toolbar {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 5px 10px;
   border-bottom: 1px solid #2e303a;
   flex-wrap: wrap;
-  font-size: 12.5px;
+  font-size: 11.5px;
 }
 .plot-toolbar label {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   color: #8b93a1;
+}
+.plot-toolbar select {
+  max-width: 110px;
+  font-size: 11px;
+  padding: 2px 4px;
 }
 .event-count {
   margin-left: auto;
   color: #6b7280;
-  font-size: 11.5px;
+  font-size: 11px;
 }
 .hint {
-  padding: 4px 12px;
-  font-size: 11.5px;
+  padding: 3px 10px;
+  font-size: 10.5px;
   color: #ff9f1c;
   background: rgba(255, 159, 28, 0.08);
 }
@@ -275,34 +366,6 @@
   padding-top: 0;
 }
 
-.breadcrumb {
-  padding: 6px 12px;
-  font-size: 12px;
-  border-bottom: 1px solid #2e303a;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.breadcrumb-sep {
-  margin: 0 6px;
-  color: #4b5160;
-}
-.breadcrumb-item {
-  cursor: pointer;
-  color: #8b93a1;
-}
-.breadcrumb-item:hover {
-  color: #cfe0ff;
-  text-decoration: underline;
-}
-.breadcrumb-current {
-  color: #2ee6a6;
-  cursor: default;
-  font-weight: 600;
-}
-.breadcrumb-current:hover {
-  text-decoration: none;
-}
 .plot-canvas-container {
   flex: 1;
   position: relative;
@@ -349,8 +412,21 @@
   border-bottom: 1px solid #23242c;
   white-space: nowrap;
 }
-.stats-table tr.row-active td:first-child {
-  color: #2ee6a6;
+.stats-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+}
+.stats-controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #8b93a1;
+}
+.stats-controls select {
+  font-size: 11px;
+  padding: 2px 4px;
 }
 
 /* Modal */

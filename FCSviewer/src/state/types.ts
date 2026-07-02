@@ -1,6 +1,27 @@
 import type { FCSParameter } from '../fcs/types';
 import type { GateNode } from '../gating/gateTypes';
 
+/**
+ * A single plot in a sample's workspace. Each panel is permanently bound to
+ * one population (gateId) with its own axes/scale/plot type — mirroring
+ * FlowJo's layout of linked plots rather than one plot that swaps in place.
+ * Drilling into a gate creates a new child panel instead of navigating.
+ */
+export interface Panel {
+  id: string;
+  gateId: string;
+  /** The panel this one was drilled down from, for layout + connector lines. Null for a root-level panel. */
+  parentPanelId: string | null;
+  xParam: string;
+  yParam: string;
+  plotType: 'scatter' | 'histogram';
+  xLogScale: boolean;
+  yLogScale: boolean;
+  /** Position within the sample's workspace canvas, in px. */
+  x: number;
+  y: number;
+}
+
 export interface Sample {
   id: string;
   fileName: string;
@@ -13,13 +34,8 @@ export interface Sample {
   paramIndex: Record<string, number>;
   /** All gates for this sample, keyed by id, including the synthetic root. */
   gates: Record<string, GateNode>;
-  /** Currently selected population being viewed / gated on. */
-  activeGateId: string;
-  xParam: string;
-  yParam: string;
-  plotType: 'scatter' | 'histogram';
-  xLogScale: boolean;
-  yLogScale: boolean;
+  /** All open plots for this sample. */
+  panels: Panel[];
 }
 
 export function getColumn(sample: Sample, paramName: string): Float32Array {

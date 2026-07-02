@@ -6,7 +6,7 @@ import type { GateStat } from '../gating/gateStats';
 import { ApplyGatesDialog } from './ApplyGatesDialog';
 
 export function GateTree({ sample, stats }: { sample: Sample; stats: GateStat[] }) {
-  const { samples, selectGate, renameGate, deleteGate, applyGatingStrategy } = useStore();
+  const { samples, focusPanelForGate, renameGate, deleteGate, applyGatingStrategy } = useStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [applyDialogOpen, setApplyDialogOpen] = useState(false);
@@ -28,7 +28,7 @@ export function GateTree({ sample, stats }: { sample: Sample; stats: GateStat[] 
         {stats.map((s) => (
           <li
             key={s.gateId}
-            className={`gate-item ${s.gateId === sample.activeGateId ? 'gate-item-active' : ''}`}
+            className={`gate-item ${sample.panels.some((p) => p.gateId === s.gateId) ? 'gate-item-active' : ''}`}
             style={{ paddingLeft: 8 + s.depth * 16 }}
           >
             {editingId === s.gateId ? (
@@ -52,13 +52,13 @@ export function GateTree({ sample, stats }: { sample: Sample; stats: GateStat[] 
             ) : (
               <span
                 className="gate-name"
-                onClick={() => selectGate(sample.id, s.gateId)}
+                onClick={() => focusPanelForGate(sample.id, s.gateId)}
                 onDoubleClick={() => {
                   if (s.gateId === ROOT_GATE_ID) return;
                   setEditingId(s.gateId);
                   setEditValue(s.name);
                 }}
-                title="Click to view · double-click to rename"
+                title="Click to open/focus its panel · double-click to rename"
               >
                 {s.name}
               </span>

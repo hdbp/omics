@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { getColumn, type Sample } from '../state/types';
+import { getColumn, type Sample, type Panel } from '../state/types';
 import { ancestorChain, getGateEventIndices, shapeContainsPoint } from '../gating/gateEval';
 import type { GateShape, Point } from '../gating/gateTypes';
 import {
@@ -15,21 +15,33 @@ import {
 } from '../utils/scale';
 import { densityColor } from '../utils/colormap';
 import { GateNameDialog } from './GateNameDialog';
+import { PANEL_WIDTH, PANEL_HEIGHT } from '../state/panelLayout';
 
 type Mode = 'none' | 'rectangle' | 'polygon' | 'range';
 
-const MARGIN = { top: 16, right: 24, bottom: 46, left: 64 };
+const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
 const CLOSE_RADIUS_PX = 9;
 
 function paramRange(sample: Sample, name: string): number {
   return sample.parameters.find((p) => p.name === name)?.range ?? 1;
 }
 
-export function PlotCanvas({ sample }: { sample: Sample }) {
-  const { setAxis, setPlotType, setLogScale, addGate, selectGate } = useStore();
+interface Props {
+  sample: Sample;
+  panel: Panel;
+  isFocused: boolean;
+  onDragHandleDown: (e: React.MouseEvent) => void;
+  onRegisterCanvas: (panelId: string, el: HTMLCanvasElement | null) => void;
+  onRegisterRoot: (panelId: string, el: HTMLDivElement | null) => void;
+}
+
+export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegisterCanvas, onRegisterRoot }: Props) {
+  const { updatePanelAxis, updatePanelPlotType, updatePanelLogScale, addGate, addChildPanel, removePanel } =
+    useStore();
+  const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [size, setSize] = useState({ width: 640, height: 560 });
+  const [size, setSize] = useState({ width: 340, height: 230 });
   const [mode, setMode] = useState<Mode>('none');
   const [rectDraft, setRectDraft] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const [rangeDraft, setRangeDraft] = useState<{ min: number; max: number } | null>(null);
@@ -38,19 +50,37 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
   const [pendingShape, setPendingShape] = useState<GateShape | null>(null);
   const [drawing, setDrawing] = useState(false);
 
-  const xLog = sample.xLogScale;
-  const yLog = sample.plotType === 'scatter' && sample.yLogScale;
+  const xLog = panel.xLogScale;
+  const yLog = panel.plotType === 'scatter' && panel.yLogScale;
+  const gateNode = sample.gates[panel.gateId];
+  const path = useMemo(() => ancestorChain(sample.gates, panel.gateId), [sample.gates, panel.gateId]);
+
+  useEffect(() => {
+    if (isFocused) {
+      rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  }, [isFocused]);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
       const box = entries[0].contentRect;
-      setSize({ width: Math.max(320, box.width), height: Math.max(320, box.height) });
+      setSize({ width: Math.max(200, box.width), height: Math.max(160, box.height) });
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  useEffect(() => {
+    onRegisterCanvas(panel.id, canvasRef.current);
+    onRegisterRoot(panel.id, rootRef.current);
+    return () => {
+      onRegisterCanvas(panel.id, null);
+      onRegisterRoot(panel.id, null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel.id]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -63,14 +93,14 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
         setDrawing(false);
       }
       if (e.key === 'Enter' && mode === 'polygon' && polyPoints.length >= 3) {
-        setPendingShape({ kind: 'polygon', xParam: sample.xParam, yParam: sample.yParam, points: polyPoints });
+        setPendingShape({ kind: 'polygon', xParam: panel.xParam, yParam: panel.yParam, points: polyPoints });
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mode, polyPoints, sample.xParam, sample.yParam]);
+  }, [mode, polyPoints, panel.xParam, panel.yParam]);
 
-  // Reset any in-progress draw when the population, axes, plot type, or scale changes.
+  // Reset any in-progress draw when the axes, plot type, or scale change.
   useEffect(() => {
     setMode('none');
     setRectDraft(null);
@@ -78,16 +108,15 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
     setPolyPoints([]);
     setPendingShape(null);
     setDrawing(false);
-  }, [sample.activeGateId, sample.xParam, sample.yParam, sample.plotType, sample.id, xLog, yLog]);
+  }, [panel.xParam, panel.yParam, panel.plotType, xLog, yLog]);
 
-  const indices = useMemo(() => getGateEventIndices(sample, sample.activeGateId), [sample]);
-  const breadcrumb = useMemo(() => ancestorChain(sample.gates, sample.activeGateId), [sample]);
+  const indices = useMemo(() => getGateEventIndices(sample, panel.gateId), [sample, panel.gateId]);
 
   const plotWidth = size.width - MARGIN.left - MARGIN.right;
   const plotHeight = size.height - MARGIN.top - MARGIN.bottom;
 
-  const xDomainMax = paramRange(sample, sample.xParam);
-  const yDomainMax = sample.plotType === 'scatter' ? paramRange(sample, sample.yParam) : 0;
+  const xDomainMax = paramRange(sample, panel.xParam);
+  const yDomainMax = panel.plotType === 'scatter' ? paramRange(sample, panel.yParam) : 0;
 
   const scaleX: LinearScale = useMemo(
     () =>
@@ -100,11 +129,10 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
     [xDomainMax, plotWidth, xLog]
   );
 
-  // Histogram Y domain depends on bin counts, computed below; scatter Y domain is the param range.
   const histogram = useMemo(() => {
-    if (sample.plotType !== 'histogram') return null;
-    const nBins = 200;
-    const col = getColumn(sample, sample.xParam);
+    if (panel.plotType !== 'histogram') return null;
+    const nBins = 150;
+    const col = getColumn(sample, panel.xParam);
     const plotMin = dataToPlotValue(xLog ? 1 : 0, xLog);
     const plotMax = dataToPlotValue(xDomainMax, xLog);
     const span = plotMax - plotMin || 1;
@@ -119,10 +147,10 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
     let max = 1;
     for (let b = 0; b < nBins; b++) if (counts[b] > max) max = counts[b];
     return { counts, nBins, max };
-  }, [sample, indices, xDomainMax, xLog]);
+  }, [sample, panel.plotType, panel.xParam, indices, xDomainMax, xLog]);
 
   const scaleY: LinearScale = useMemo(() => {
-    if (sample.plotType === 'histogram') {
+    if (panel.plotType === 'histogram') {
       return makeScale(0, histogram?.max ?? 1, MARGIN.top + plotHeight, MARGIN.top);
     }
     return makeScale(
@@ -131,22 +159,18 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
       MARGIN.top + plotHeight,
       MARGIN.top
     );
-  }, [sample.plotType, histogram, yDomainMax, plotHeight, yLog]);
+  }, [panel.plotType, histogram, yDomainMax, plotHeight, yLog]);
 
-  // Pixel <-> raw-data-value helpers. Gate shapes always store raw values;
-  // only the pixel mapping is aware of the log/linear toggle.
   const xToPx = (raw: number) => toRange(scaleX, dataToPlotValue(raw, xLog));
   const pxToX = (px: number) => plotValueToData(toDomain(scaleX, px), xLog);
   const yToPx = (raw: number) => toRange(scaleY, dataToPlotValue(raw, yLog));
   const pxToY = (px: number) => plotValueToData(toDomain(scaleY, px), yLog);
 
-  // Density lookup for scatter pseudocolor: bin the displayed population on a coarse grid
-  // in plot (post-transform) space so bins are visually even under a log scale.
   const densityGrid = useMemo(() => {
-    if (sample.plotType !== 'scatter') return null;
-    const gridN = 96;
-    const xCol = getColumn(sample, sample.xParam);
-    const yCol = getColumn(sample, sample.yParam);
+    if (panel.plotType !== 'scatter') return null;
+    const gridN = 80;
+    const xCol = getColumn(sample, panel.xParam);
+    const yCol = getColumn(sample, panel.yParam);
     const xPlotMin = dataToPlotValue(xLog ? 1 : 0, xLog);
     const xSpan = dataToPlotValue(xDomainMax, xLog) - xPlotMin || 1;
     const yPlotMin = dataToPlotValue(yLog ? 1 : 0, yLog);
@@ -168,7 +192,7 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
     let maxCount = 1;
     for (let b = 0; b < counts.length; b++) if (counts[b] > maxCount) maxCount = counts[b];
     return { counts, binOf, maxCount, gridN };
-  }, [sample, indices, xDomainMax, yDomainMax, xLog, yLog]);
+  }, [sample, panel.plotType, panel.xParam, panel.yParam, indices, xDomainMax, yDomainMax, xLog, yLog]);
 
   // ---- Rendering ----
   useEffect(() => {
@@ -182,15 +206,15 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, size.width, size.height);
+    ctx.fillStyle = '#1a1b22';
+    ctx.fillRect(0, 0, size.width, size.height);
 
-    // Plot border + axes
     ctx.strokeStyle = '#3a3f4b';
     ctx.lineWidth = 1;
     ctx.strokeRect(MARGIN.left, MARGIN.top, plotWidth, plotHeight);
 
     ctx.fillStyle = '#9aa4b2';
-    ctx.font = '11px system-ui, sans-serif';
+    ctx.font = '10px system-ui, sans-serif';
     ctx.textAlign = 'center';
     const xTicks = xLog ? logTicks(xDomainMax) : niceTicks(0, xDomainMax);
     for (const t of xTicks) {
@@ -199,36 +223,37 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
       ctx.moveTo(px, MARGIN.top + plotHeight);
       ctx.lineTo(px, MARGIN.top + plotHeight + 4);
       ctx.stroke();
-      ctx.fillText(formatTick(t), px, MARGIN.top + plotHeight + 16);
+      ctx.fillText(formatTick(t), px, MARGIN.top + plotHeight + 14);
     }
     ctx.textAlign = 'right';
     const yTicks =
-      sample.plotType === 'scatter' && yLog ? logTicks(yDomainMax) : niceTicks(0, sample.plotType === 'histogram' ? (histogram?.max ?? 1) : yDomainMax);
+      panel.plotType === 'scatter' && yLog
+        ? logTicks(yDomainMax)
+        : niceTicks(0, panel.plotType === 'histogram' ? (histogram?.max ?? 1) : yDomainMax);
     for (const t of yTicks) {
-      const py = sample.plotType === 'histogram' ? toRange(scaleY, t) : yToPx(t);
+      const py = panel.plotType === 'histogram' ? toRange(scaleY, t) : yToPx(t);
       ctx.beginPath();
       ctx.moveTo(MARGIN.left - 4, py);
       ctx.lineTo(MARGIN.left, py);
       ctx.stroke();
-      ctx.fillText(formatTick(t), MARGIN.left - 8, py + 3);
+      ctx.fillText(formatTick(t), MARGIN.left - 7, py + 3);
     }
     ctx.textAlign = 'center';
     ctx.fillStyle = '#c7cdd6';
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.fillText(sample.xParam + (xLog ? ' (log)' : ''), MARGIN.left + plotWidth / 2, size.height - 8);
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.fillText(panel.xParam + (xLog ? ' (log)' : ''), MARGIN.left + plotWidth / 2, size.height - 6);
     ctx.save();
-    ctx.translate(14, MARGIN.top + plotHeight / 2);
+    ctx.translate(12, MARGIN.top + plotHeight / 2);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillText(sample.plotType === 'histogram' ? 'Count' : sample.yParam + (yLog ? ' (log)' : ''), 0, 0);
+    ctx.fillText(panel.plotType === 'histogram' ? 'Count' : panel.yParam + (yLog ? ' (log)' : ''), 0, 0);
     ctx.restore();
 
-    // Clip to plot area for data drawing
     ctx.save();
     ctx.beginPath();
     ctx.rect(MARGIN.left, MARGIN.top, plotWidth, plotHeight);
     ctx.clip();
 
-    if (sample.plotType === 'histogram' && histogram) {
+    if (panel.plotType === 'histogram' && histogram) {
       const binWidth = plotWidth / histogram.nBins;
       ctx.fillStyle = '#4f8dff';
       for (let b = 0; b < histogram.nBins; b++) {
@@ -238,9 +263,9 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
         const yTop = toRange(scaleY, c);
         ctx.fillRect(x, yTop, Math.max(1, binWidth), MARGIN.top + plotHeight - yTop);
       }
-    } else if (sample.plotType === 'scatter' && densityGrid) {
-      const xCol = getColumn(sample, sample.xParam);
-      const yCol = getColumn(sample, sample.yParam);
+    } else if (panel.plotType === 'scatter' && densityGrid) {
+      const xCol = getColumn(sample, panel.xParam);
+      const yCol = getColumn(sample, panel.yParam);
       for (let i = 0; i < indices.length; i++) {
         const idx = indices[i];
         const px = xToPx(xCol[idx]);
@@ -252,31 +277,28 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
       }
     }
 
-    // Overlay existing child gates of the active population
-    const activeNode = sample.gates[sample.activeGateId];
-    for (const childId of activeNode?.childIds ?? []) {
+    for (const childId of gateNode?.childIds ?? []) {
       const child = sample.gates[childId];
       const shape = child.shape;
       if (!shape) continue;
-      if (shape.kind === 'range' && sample.plotType === 'histogram' && shape.param === sample.xParam) {
+      if (shape.kind === 'range' && panel.plotType === 'histogram' && shape.param === panel.xParam) {
         drawRangeOverlay(ctx, xToPx, shape.min, shape.max, MARGIN.top, plotHeight, child.name, false);
       } else if (
         shape.kind !== 'range' &&
-        sample.plotType === 'scatter' &&
-        shape.xParam === sample.xParam &&
-        shape.yParam === sample.yParam
+        panel.plotType === 'scatter' &&
+        shape.xParam === panel.xParam &&
+        shape.yParam === panel.yParam
       ) {
         drawShapeOverlay(ctx, xToPx, yToPx, shape, child.name, false);
       }
     }
 
-    // Draft (in-progress) shape
     if (mode === 'rectangle' && rectDraft) {
       drawShapeOverlay(
         ctx,
         xToPx,
         yToPx,
-        { kind: 'rectangle', xParam: sample.xParam, yParam: sample.yParam, ...rectDraft },
+        { kind: 'rectangle', xParam: panel.xParam, yParam: panel.yParam, ...rectDraft },
         '',
         true
       );
@@ -349,7 +371,7 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
     ctx.setLineDash([]);
     if (label) {
       ctx.fillStyle = '#2ee6a6';
-      ctx.font = '11px system-ui, sans-serif';
+      ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(label, labelX, labelY);
     }
@@ -380,7 +402,7 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
     ctx.setLineDash([]);
     if (label) {
       ctx.fillStyle = '#2ee6a6';
-      ctx.font = '11px system-ui, sans-serif';
+      ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(label, x1 + 3, top + 12);
     }
@@ -414,7 +436,7 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
         const px = getMousePx(e);
         const dist = Math.hypot(px.x - firstPx.x, px.y - firstPx.y);
         if (dist <= CLOSE_RADIUS_PX) {
-          setPendingShape({ kind: 'polygon', xParam: sample.xParam, yParam: sample.yParam, points: polyPoints });
+          setPendingShape({ kind: 'polygon', xParam: panel.xParam, yParam: panel.yParam, points: polyPoints });
           return;
         }
       }
@@ -440,13 +462,13 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
     setDrawing(false);
     if (mode === 'rectangle' && rectDraft) {
       if (Math.abs(rectDraft.x1 - rectDraft.x2) > 1e-6 && Math.abs(rectDraft.y1 - rectDraft.y2) > 1e-6) {
-        setPendingShape({ kind: 'rectangle', xParam: sample.xParam, yParam: sample.yParam, ...rectDraft });
+        setPendingShape({ kind: 'rectangle', xParam: panel.xParam, yParam: panel.yParam, ...rectDraft });
       } else {
         setRectDraft(null);
       }
     } else if (mode === 'range' && rangeDraft) {
       if (Math.abs(rangeDraft.min - rangeDraft.max) > 1e-6) {
-        setPendingShape({ kind: 'range', param: sample.xParam, min: rangeDraft.min, max: rangeDraft.max });
+        setPendingShape({ kind: 'range', param: panel.xParam, min: rangeDraft.min, max: rangeDraft.max });
       } else {
         setRangeDraft(null);
       }
@@ -455,32 +477,32 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
 
   function handleDoubleClick() {
     if (mode === 'polygon' && polyPoints.length >= 3) {
-      setPendingShape({ kind: 'polygon', xParam: sample.xParam, yParam: sample.yParam, points: polyPoints });
+      setPendingShape({ kind: 'polygon', xParam: panel.xParam, yParam: panel.yParam, points: polyPoints });
     }
   }
 
-  // Clicking directly on an existing child gate's shape (outside of drawing mode) drills into it.
+  // Clicking directly on an existing child gate's shape (outside of drawing mode) drills down,
+  // opening (or focusing) a brand-new panel for that population.
   function handleClick(e: React.MouseEvent<HTMLCanvasElement>) {
     if (mode !== 'none') return;
     const data = getMouseData(e);
-    const activeNode = sample.gates[sample.activeGateId];
-    for (const childId of activeNode?.childIds ?? []) {
+    for (const childId of gateNode?.childIds ?? []) {
       const child = sample.gates[childId];
       const shape = child.shape;
       if (!shape) continue;
-      if (sample.plotType === 'histogram' && shape.kind === 'range' && shape.param === sample.xParam) {
+      if (panel.plotType === 'histogram' && shape.kind === 'range' && shape.param === panel.xParam) {
         if (shapeContainsPoint(shape, data.x, 0)) {
-          selectGate(sample.id, childId);
+          addChildPanel(sample.id, panel.id, childId);
           return;
         }
       } else if (
-        sample.plotType === 'scatter' &&
+        panel.plotType === 'scatter' &&
         shape.kind !== 'range' &&
-        shape.xParam === sample.xParam &&
-        shape.yParam === sample.yParam
+        shape.xParam === panel.xParam &&
+        shape.yParam === panel.yParam
       ) {
         if (shapeContainsPoint(shape, data.x, data.y)) {
-          selectGate(sample.id, childId);
+          addChildPanel(sample.id, panel.id, childId);
           return;
         }
       }
@@ -489,7 +511,7 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
 
   function confirmGate(name: string) {
     if (!pendingShape) return;
-    addGate(sample.id, sample.activeGateId, name, pendingShape);
+    addGate(sample.id, panel.gateId, name, pendingShape);
     setPendingShape(null);
     setRectDraft(null);
     setRangeDraft(null);
@@ -500,11 +522,29 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
   const params = sample.parameters;
 
   return (
-    <div className="plot-panel">
+    <div
+      ref={rootRef}
+      className={`gate-panel ${isFocused ? 'gate-panel-focused' : ''}`}
+      style={{ left: panel.x, top: panel.y, width: PANEL_WIDTH, height: PANEL_HEIGHT }}
+    >
+      <div className="gate-panel-header" onMouseDown={onDragHandleDown}>
+        <span className="gate-panel-title" title={path.map((n) => n.name).join(' › ')}>
+          {gateNode?.name ?? 'Population'}
+        </span>
+        <button
+          className="gate-panel-close"
+          title="Close this panel"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => removePanel(sample.id, panel.id)}
+        >
+          ×
+        </button>
+      </div>
+      <div className="gate-panel-path">{path.map((n) => n.name).join(' › ')}</div>
       <div className="plot-toolbar">
         <label>
           X:
-          <select value={sample.xParam} onChange={(e) => setAxis(sample.id, 'xParam', e.target.value)}>
+          <select value={panel.xParam} onChange={(e) => updatePanelAxis(sample.id, panel.id, 'xParam', e.target.value)}>
             {params.map((p) => (
               <option key={p.name} value={p.name}>
                 {p.label !== p.name ? `${p.name} (${p.label})` : p.name}
@@ -513,17 +553,17 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
           </select>
         </label>
         <button
-          className={`btn ${xLog ? 'btn-active' : ''}`}
+          className={`btn btn-small ${xLog ? 'btn-active' : ''}`}
           title="Toggle logarithmic X axis"
-          onClick={() => setLogScale(sample.id, 'xLogScale', !sample.xLogScale)}
+          onClick={() => updatePanelLogScale(sample.id, panel.id, 'xLogScale', !panel.xLogScale)}
         >
           log X
         </button>
-        {sample.plotType === 'scatter' && (
+        {panel.plotType === 'scatter' && (
           <>
             <label>
               Y:
-              <select value={sample.yParam} onChange={(e) => setAxis(sample.id, 'yParam', e.target.value)}>
+              <select value={panel.yParam} onChange={(e) => updatePanelAxis(sample.id, panel.id, 'yParam', e.target.value)}>
                 {params.map((p) => (
                   <option key={p.name} value={p.name}>
                     {p.label !== p.name ? `${p.name} (${p.label})` : p.name}
@@ -532,55 +572,57 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
               </select>
             </label>
             <button
-              className={`btn ${yLog ? 'btn-active' : ''}`}
+              className={`btn btn-small ${yLog ? 'btn-active' : ''}`}
               title="Toggle logarithmic Y axis"
-              onClick={() => setLogScale(sample.id, 'yLogScale', !sample.yLogScale)}
+              onClick={() => updatePanelLogScale(sample.id, panel.id, 'yLogScale', !panel.yLogScale)}
             >
               log Y
             </button>
           </>
         )}
+      </div>
+      <div className="plot-toolbar">
         <div className="btn-group">
           <button
-            className={`btn ${sample.plotType === 'scatter' ? 'btn-active' : ''}`}
-            onClick={() => setPlotType(sample.id, 'scatter')}
+            className={`btn btn-small ${panel.plotType === 'scatter' ? 'btn-active' : ''}`}
+            onClick={() => updatePanelPlotType(sample.id, panel.id, 'scatter')}
           >
             Dot plot
           </button>
           <button
-            className={`btn ${sample.plotType === 'histogram' ? 'btn-active' : ''}`}
-            onClick={() => setPlotType(sample.id, 'histogram')}
+            className={`btn btn-small ${panel.plotType === 'histogram' ? 'btn-active' : ''}`}
+            onClick={() => updatePanelPlotType(sample.id, panel.id, 'histogram')}
           >
             Histogram
           </button>
         </div>
         <div className="btn-group">
-          {sample.plotType === 'scatter' ? (
+          {panel.plotType === 'scatter' ? (
             <>
               <button
-                className={`btn ${mode === 'rectangle' ? 'btn-active' : ''}`}
+                className={`btn btn-small ${mode === 'rectangle' ? 'btn-active' : ''}`}
                 onClick={() => setMode(mode === 'rectangle' ? 'none' : 'rectangle')}
               >
-                ▭ Rectangle gate
+                ▭
               </button>
               <button
-                className={`btn ${mode === 'polygon' ? 'btn-active' : ''}`}
+                className={`btn btn-small ${mode === 'polygon' ? 'btn-active' : ''}`}
                 onClick={() => setMode(mode === 'polygon' ? 'none' : 'polygon')}
               >
-                ⬠ Polygon gate
+                ⬠
               </button>
             </>
           ) : (
             <button
-              className={`btn ${mode === 'range' ? 'btn-active' : ''}`}
+              className={`btn btn-small ${mode === 'range' ? 'btn-active' : ''}`}
               onClick={() => setMode(mode === 'range' ? 'none' : 'range')}
             >
-              ↔ Range gate
+              ↔
             </button>
           )}
           {mode !== 'none' && (
             <button
-              className="btn"
+              className="btn btn-small"
               onClick={() => {
                 setMode('none');
                 setRectDraft(null);
@@ -592,28 +634,13 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
             </button>
           )}
         </div>
-        <span className="event-count">
-          {indices.length.toLocaleString()} / {sample.eventCount.toLocaleString()} events
-        </span>
-      </div>
-      <div className="breadcrumb">
-        {breadcrumb.map((node, i) => (
-          <span key={node.id}>
-            {i > 0 && <span className="breadcrumb-sep">›</span>}
-            <span
-              className={`breadcrumb-item ${node.id === sample.activeGateId ? 'breadcrumb-current' : ''}`}
-              onClick={() => node.id !== sample.activeGateId && selectGate(sample.id, node.id)}
-            >
-              {node.name}
-            </span>
-          </span>
-        ))}
+        <span className="event-count">{indices.length.toLocaleString()}</span>
       </div>
       {mode === 'polygon' && (
-        <div className="hint">Click to add vertices. Click near the first point, double-click, or press Enter to close.</div>
+        <div className="hint">Click vertices; click near the first, dbl-click, or Enter to close.</div>
       )}
-      {mode === 'none' && breadcrumb[breadcrumb.length - 1]?.childIds.length > 0 && (
-        <div className="hint hint-subtle">Click a gated region to drill into it.</div>
+      {mode === 'none' && (gateNode?.childIds.length ?? 0) > 0 && (
+        <div className="hint hint-subtle">Click a gated region to open it in a new panel.</div>
       )}
       <div className="plot-canvas-container" ref={containerRef}>
         <canvas
@@ -628,7 +655,7 @@ export function PlotCanvas({ sample }: { sample: Sample }) {
       </div>
       {pendingShape && (
         <GateNameDialog
-          defaultName={`Gate ${(sample.gates[sample.activeGateId]?.childIds.length ?? 0) + 1}`}
+          defaultName={`Gate ${(gateNode?.childIds.length ?? 0) + 1}`}
           onConfirm={confirmGate}
           onCancel={() => setPendingShape(null)}
         />

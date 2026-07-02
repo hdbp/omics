@@ -5,7 +5,33 @@ import type { GateShape } from '../gating/gateTypes';
 import { getDescendantIds } from '../gating/gateEval';
 import { cloneGateTree } from '../gating/gateClone';
 import { makeId } from '../utils/id';
-import type { Sample } from './types';
+import { nextPanelPosition, autoArrangeAll } from './panelLayout';
+import type { Sample, Panel } from './types';
+import type { FCSParameter } from '../fcs/types';
+
+function pickDefaultAxes(parameters: FCSParameter[], avoid: string[]): [string, string] {
+  const names = parameters.map((p) => p.name);
+  const candidates = names.filter((n) => !avoid.includes(n));
+  const x = candidates[0] ?? names[0] ?? '';
+  const y = candidates[1] ?? candidates[0] ?? names[1] ?? names[0] ?? '';
+  return [x, y];
+}
+
+function createRootPanel(parameters: FCSParameter[]): Panel {
+  const [xParam, yParam] = pickDefaultAxes(parameters, []);
+  return {
+    id: makeId('panel'),
+    gateId: ROOT_GATE_ID,
+    parentPanelId: null,
+    xParam,
+    yParam,
+    plotType: 'scatter',
+    xLogScale: false,
+    yLogScale: false,
+    x: 24,
+    y: 24,
+  };
+}
 
 interface AppState {
   samples: Sample[];
@@ -13,6 +39,8 @@ interface AppState {
   loading: boolean;
   error: string | null;
   notice: string | null;
+  /** Panel to scroll into view / briefly highlight, set right after it's created or focused. */
+  focusedPanelId: string | null;
 
   loadFiles: (files: FileList | File[]) => Promise<void>;
   removeSample: (sampleId: string) => void;
@@ -20,10 +48,17 @@ interface AppState {
   clearError: () => void;
   clearNotice: () => void;
 
-  setAxis: (sampleId: string, axis: 'xParam' | 'yParam', value: string) => void;
-  setPlotType: (sampleId: string, plotType: 'scatter' | 'histogram') => void;
-  setLogScale: (sampleId: string, axis: 'xLogScale' | 'yLogScale', value: boolean) => void;
-  selectGate: (sampleId: string, gateId: string) => void;
+  updatePanelAxis: (sampleId: string, panelId: string, axis: 'xParam' | 'yParam', value: string) => void;
+  updatePanelPlotType: (sampleId: string, panelId: string, plotType: 'scatter' | 'histogram') => void;
+  updatePanelLogScale: (sampleId: string, panelId: string, axis: 'xLogScale' | 'yLogScale', value: boolean) => void;
+  movePanel: (sampleId: string, panelId: string, x: number, y: number) => void;
+  removePanel: (sampleId: string, panelId: string) => void;
+  autoArrangePanels: (sampleId: string) => void;
+  /** Creates (or reuses) a child panel viewing `gateId`, drilled down from `parentPanelId`. Returns its id. */
+  addChildPanel: (sampleId: string, parentPanelId: string | null, gateId: string) => string;
+  /** Used from the gate tree: focuses an existing panel for this gate, or creates one anchored under the nearest ancestor panel. */
+  focusPanelForGate: (sampleId: string, gateId: string) => void;
+  focusPanel: (panelId: string | null) => void;
 
   addGate: (sampleId: string, parentId: string, name: string, shape: GateShape) => string;
   renameGate: (sampleId: string, gateId: string, name: string) => void;
@@ -42,9 +77,11 @@ export const useStore = create<AppState>((set, get) => ({
   loading: false,
   error: null,
   notice: null,
+  focusedPanelId: null,
 
   clearError: () => set({ error: null }),
   clearNotice: () => set({ notice: null }),
+  focusPanel: (panelId) => set({ focusedPanelId: panelId }),
 
   loadFiles: async (fileList) => {
     const files = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith('.fcs'));
@@ -65,8 +102,6 @@ export const useStore = create<AppState>((set, get) => ({
           paramIndex[p.name] = i;
         });
         const root = makeRootGate();
-        const xParam = parsed.parameters[0]?.name ?? '';
-        const yParam = parsed.parameters[1]?.name ?? parsed.parameters[0]?.name ?? '';
         newSamples.push({
           id: makeId('sample'),
           fileName: file.name,
@@ -76,12 +111,7 @@ export const useStore = create<AppState>((set, get) => ({
           eventCount: parsed.eventCount,
           paramIndex,
           gates: { [ROOT_GATE_ID]: root },
-          activeGateId: ROOT_GATE_ID,
-          xParam,
-          yParam,
-          plotType: 'scatter',
-          xLogScale: false,
-          yLogScale: false,
+          panels: [createRootPanel(parsed.parameters)],
         });
       } catch (e) {
         const msg = e instanceof FCSParseError ? e.message : `${e}`;
@@ -107,25 +137,112 @@ export const useStore = create<AppState>((set, get) => ({
 
   selectSample: (sampleId) => set({ activeSampleId: sampleId }),
 
-  setAxis: (sampleId, axis, value) =>
+  updatePanelAxis: (sampleId, panelId, axis, value) =>
     set((state) => ({
-      samples: updateSample(state.samples, sampleId, (s) => ({ ...s, [axis]: value })),
+      samples: updateSample(state.samples, sampleId, (s) => ({
+        ...s,
+        panels: s.panels.map((p) => (p.id === panelId ? { ...p, [axis]: value } : p)),
+      })),
     })),
 
-  setPlotType: (sampleId, plotType) =>
+  updatePanelPlotType: (sampleId, panelId, plotType) =>
     set((state) => ({
-      samples: updateSample(state.samples, sampleId, (s) => ({ ...s, plotType })),
+      samples: updateSample(state.samples, sampleId, (s) => ({
+        ...s,
+        panels: s.panels.map((p) => (p.id === panelId ? { ...p, plotType } : p)),
+      })),
     })),
 
-  setLogScale: (sampleId, axis, value) =>
+  updatePanelLogScale: (sampleId, panelId, axis, value) =>
     set((state) => ({
-      samples: updateSample(state.samples, sampleId, (s) => ({ ...s, [axis]: value })),
+      samples: updateSample(state.samples, sampleId, (s) => ({
+        ...s,
+        panels: s.panels.map((p) => (p.id === panelId ? { ...p, [axis]: value } : p)),
+      })),
     })),
 
-  selectGate: (sampleId, gateId) =>
+  movePanel: (sampleId, panelId, x, y) =>
     set((state) => ({
-      samples: updateSample(state.samples, sampleId, (s) => ({ ...s, activeGateId: gateId })),
+      samples: updateSample(state.samples, sampleId, (s) => ({
+        ...s,
+        panels: s.panels.map((p) => (p.id === panelId ? { ...p, x, y } : p)),
+      })),
     })),
+
+  removePanel: (sampleId, panelId) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => {
+        const removed = s.panels.find((p) => p.id === panelId);
+        if (!removed) return s;
+        const panels = s.panels
+          .filter((p) => p.id !== panelId)
+          .map((p) => (p.parentPanelId === panelId ? { ...p, parentPanelId: removed.parentPanelId } : p));
+        return { ...s, panels };
+      }),
+    })),
+
+  autoArrangePanels: (sampleId) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => {
+        const positions = autoArrangeAll(s.panels);
+        return { ...s, panels: s.panels.map((p) => ({ ...p, ...(positions.get(p.id) ?? {}) })) };
+      }),
+    })),
+
+  addChildPanel: (sampleId, parentPanelId, gateId) => {
+    let resultId = '';
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => {
+        const existing = s.panels.find((p) => p.parentPanelId === parentPanelId && p.gateId === gateId);
+        if (existing) {
+          resultId = existing.id;
+          return s;
+        }
+        const parent = parentPanelId ? (s.panels.find((p) => p.id === parentPanelId) ?? null) : null;
+        const avoid = parent ? [parent.xParam, parent.yParam] : [];
+        const [xParam, yParam] = pickDefaultAxes(s.parameters, avoid);
+        const pos = nextPanelPosition(s.panels, parent);
+        const panel: Panel = {
+          id: makeId('panel'),
+          gateId,
+          parentPanelId,
+          xParam,
+          yParam,
+          plotType: 'scatter',
+          xLogScale: false,
+          yLogScale: false,
+          x: pos.x,
+          y: pos.y,
+        };
+        resultId = panel.id;
+        return { ...s, panels: [...s.panels, panel] };
+      }),
+    }));
+    set({ focusedPanelId: resultId });
+    return resultId;
+  },
+
+  focusPanelForGate: (sampleId, gateId) => {
+    const sample = get().samples.find((s) => s.id === sampleId);
+    if (!sample) return;
+    const existing = sample.panels.find((p) => p.gateId === gateId);
+    if (existing) {
+      set({ focusedPanelId: existing.id });
+      return;
+    }
+    // Anchor the new panel under the nearest ancestor gate that already has a panel open.
+    let parentPanel: Panel | null = null;
+    let cur = sample.gates[gateId]?.parentId ? sample.gates[sample.gates[gateId].parentId!] : undefined;
+    while (cur) {
+      const p = sample.panels.find((pp) => pp.gateId === cur!.id);
+      if (p) {
+        parentPanel = p;
+        break;
+      }
+      cur = cur.parentId ? sample.gates[cur.parentId] : undefined;
+    }
+    get().addChildPanel(sampleId, parentPanel?.id ?? null, gateId);
+  },
 
   addGate: (sampleId, parentId, name, shape) => {
     const gateId = makeId('gate');
@@ -134,7 +251,7 @@ export const useStore = create<AppState>((set, get) => ({
         const gates = { ...s.gates };
         gates[gateId] = { id: gateId, name, parentId, shape, childIds: [] };
         gates[parentId] = { ...gates[parentId], childIds: [...gates[parentId].childIds, gateId] };
-        return { ...s, gates, activeGateId: gateId };
+        return { ...s, gates };
       }),
     }));
     return gateId;
@@ -165,8 +282,17 @@ export const useStore = create<AppState>((set, get) => ({
             childIds: gates[parentId].childIds.filter((id) => id !== gateId),
           };
         }
-        const activeGateId = toRemove.has(s.activeGateId) ? (parentId ?? ROOT_GATE_ID) : s.activeGateId;
-        return { ...s, gates, activeGateId };
+        // Panels viewing a deleted gate can't survive; reparent their children panels upward so
+        // the rest of the layout doesn't get orphaned.
+        let panels = s.panels;
+        for (const removedGateId of toRemove) {
+          for (const doomed of panels.filter((p) => p.gateId === removedGateId)) {
+            panels = panels
+              .filter((p) => p.id !== doomed.id)
+              .map((p) => (p.parentPanelId === doomed.id ? { ...p, parentPanelId: doomed.parentPanelId } : p));
+          }
+        }
+        return { ...s, gates, panels };
       }),
     }));
   },
@@ -185,7 +311,8 @@ export const useStore = create<AppState>((set, get) => ({
         if (skipped.length > 0) {
           noticeLines.push(`${targetNames.get(s.id) ?? s.id}: skipped ${skipped.join(', ')} (parameter not found)`);
         }
-        return { ...s, gates, activeGateId: ROOT_GATE_ID };
+        // Old panels reference gate ids from the previous tree, which no longer exist; start fresh.
+        return { ...s, gates, panels: [createRootPanel(s.parameters)] };
       }),
     }));
 
