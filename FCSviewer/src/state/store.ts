@@ -3,44 +3,48 @@ import { parseFCS, FCSParseError } from '../fcs/parseFCS';
 import { makeRootGate, ROOT_GATE_ID } from '../gating/gateTypes';
 import type { GateShape } from '../gating/gateTypes';
 import { getDescendantIds } from '../gating/gateEval';
+import { cloneGateTree } from '../gating/gateClone';
+import { makeId } from '../utils/id';
 import type { Sample } from './types';
-
-let nextId = 1;
-function makeId(prefix: string): string {
-  return `${prefix}-${nextId++}-${Date.now().toString(36)}`;
-}
 
 interface AppState {
   samples: Sample[];
   activeSampleId: string | null;
   loading: boolean;
   error: string | null;
+  notice: string | null;
 
   loadFiles: (files: FileList | File[]) => Promise<void>;
   removeSample: (sampleId: string) => void;
   selectSample: (sampleId: string) => void;
   clearError: () => void;
+  clearNotice: () => void;
 
   setAxis: (sampleId: string, axis: 'xParam' | 'yParam', value: string) => void;
   setPlotType: (sampleId: string, plotType: 'scatter' | 'histogram') => void;
+  setLogScale: (sampleId: string, axis: 'xLogScale' | 'yLogScale', value: boolean) => void;
   selectGate: (sampleId: string, gateId: string) => void;
 
   addGate: (sampleId: string, parentId: string, name: string, shape: GateShape) => string;
   renameGate: (sampleId: string, gateId: string, name: string) => void;
   deleteGate: (sampleId: string, gateId: string) => void;
+
+  applyGatingStrategy: (sourceSampleId: string, targetSampleIds: string[]) => void;
 }
 
 function updateSample(samples: Sample[], sampleId: string, fn: (s: Sample) => Sample): Sample[] {
   return samples.map((s) => (s.id === sampleId ? fn(s) : s));
 }
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
   samples: [],
   activeSampleId: null,
   loading: false,
   error: null,
+  notice: null,
 
   clearError: () => set({ error: null }),
+  clearNotice: () => set({ notice: null }),
 
   loadFiles: async (fileList) => {
     const files = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith('.fcs'));
@@ -76,6 +80,8 @@ export const useStore = create<AppState>((set) => ({
           xParam,
           yParam,
           plotType: 'scatter',
+          xLogScale: false,
+          yLogScale: false,
         });
       } catch (e) {
         const msg = e instanceof FCSParseError ? e.message : `${e}`;
@@ -109,6 +115,11 @@ export const useStore = create<AppState>((set) => ({
   setPlotType: (sampleId, plotType) =>
     set((state) => ({
       samples: updateSample(state.samples, sampleId, (s) => ({ ...s, plotType })),
+    })),
+
+  setLogScale: (sampleId, axis, value) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => ({ ...s, [axis]: value })),
     })),
 
   selectGate: (sampleId, gateId) =>
@@ -158,6 +169,29 @@ export const useStore = create<AppState>((set) => ({
         return { ...s, gates, activeGateId };
       }),
     }));
+  },
+
+  applyGatingStrategy: (sourceSampleId, targetSampleIds) => {
+    const source = get().samples.find((s) => s.id === sourceSampleId);
+    if (!source) return;
+
+    const targetNames = new Map(get().samples.map((s) => [s.id, s.fileName]));
+    const noticeLines: string[] = [];
+
+    set((state) => ({
+      samples: state.samples.map((s) => {
+        if (!targetSampleIds.includes(s.id)) return s;
+        const { gates, skipped } = cloneGateTree(source.gates, s.paramIndex);
+        if (skipped.length > 0) {
+          noticeLines.push(`${targetNames.get(s.id) ?? s.id}: skipped ${skipped.join(', ')} (parameter not found)`);
+        }
+        return { ...s, gates, activeGateId: ROOT_GATE_ID };
+      }),
+    }));
+
+    const appliedCount = targetSampleIds.length;
+    const summary = `Applied gating strategy from "${source.fileName}" to ${appliedCount} sample${appliedCount === 1 ? '' : 's'}.`;
+    set({ notice: noticeLines.length > 0 ? `${summary}\n${noticeLines.join('\n')}` : summary });
   },
 }));
 

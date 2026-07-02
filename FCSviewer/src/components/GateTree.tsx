@@ -3,15 +3,27 @@ import { useStore } from '../state/store';
 import type { Sample } from '../state/types';
 import { ROOT_GATE_ID } from '../gating/gateTypes';
 import type { GateStat } from '../gating/gateStats';
+import { ApplyGatesDialog } from './ApplyGatesDialog';
 
 export function GateTree({ sample, stats }: { sample: Sample; stats: GateStat[] }) {
-  const { selectGate, renameGate, deleteGate } = useStore();
+  const { samples, selectGate, renameGate, deleteGate, applyGatingStrategy } = useStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [applyDialogOpen, setApplyDialogOpen] = useState(false);
+
+  const hasGates = sample.gates[ROOT_GATE_ID]?.childIds.length > 0;
+  const otherSamples = samples.filter((s) => s.id !== sample.id);
 
   return (
     <div className="gate-tree">
-      <div className="panel-title">Gating hierarchy</div>
+      <div className="panel-title-row">
+        <div className="panel-title">Gating hierarchy</div>
+        {hasGates && (
+          <button className="btn btn-small" onClick={() => setApplyDialogOpen(true)}>
+            Apply to other samples…
+          </button>
+        )}
+      </div>
       <ul className="gate-list">
         {stats.map((s) => (
           <li
@@ -69,6 +81,17 @@ export function GateTree({ sample, stats }: { sample: Sample; stats: GateStat[] 
           </li>
         ))}
       </ul>
+      {applyDialogOpen && (
+        <ApplyGatesDialog
+          source={sample}
+          otherSamples={otherSamples}
+          onCancel={() => setApplyDialogOpen(false)}
+          onConfirm={(targetIds) => {
+            applyGatingStrategy(sample.id, targetIds);
+            setApplyDialogOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

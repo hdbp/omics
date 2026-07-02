@@ -24,6 +24,30 @@ export function toDomain(scale: LinearScale, value: number): number {
   return scale.domainMin + t * (scale.domainMax - scale.domainMin);
 }
 
+/**
+ * Maps a raw parameter value into "plot space": identity when linear, or a
+ * log10 transform (floored at 1, since flow data is ~always non-negative and
+ * log(0) is undefined) when log. Gate shapes are always stored in raw data
+ * space; only the pixel mapping goes through this.
+ */
+export function dataToPlotValue(raw: number, log: boolean): number {
+  if (!log) return raw;
+  return Math.log10(Math.max(raw, 1));
+}
+
+export function plotValueToData(plotValue: number, log: boolean): number {
+  if (!log) return plotValue;
+  return 10 ** plotValue;
+}
+
+/** Decade tick values (1, 10, 100, ...) up to maxRaw, for a log-scaled axis. */
+export function logTicks(maxRaw: number): number[] {
+  const ticks: number[] = [];
+  for (let v = 1; v <= maxRaw; v *= 10) ticks.push(v);
+  if (ticks.length === 0) ticks.push(1);
+  return ticks;
+}
+
 export function niceTicks(min: number, max: number, count = 5): number[] {
   if (max <= min) return [min];
   const span = max - min;

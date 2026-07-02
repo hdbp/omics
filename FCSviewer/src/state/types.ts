@@ -18,6 +18,8 @@ export interface Sample {
   xParam: string;
   yParam: string;
   plotType: 'scatter' | 'histogram';
+  xLogScale: boolean;
+  yLogScale: boolean;
 }
 
 export function getColumn(sample: Sample, paramName: string): Float32Array {

@@ -269,6 +269,40 @@
   color: #ff9f1c;
   background: rgba(255, 159, 28, 0.08);
 }
+.hint-subtle {
+  color: #6b7280;
+  background: transparent;
+  padding-top: 0;
+}
+
+.breadcrumb {
+  padding: 6px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid #2e303a;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.breadcrumb-sep {
+  margin: 0 6px;
+  color: #4b5160;
+}
+.breadcrumb-item {
+  cursor: pointer;
+  color: #8b93a1;
+}
+.breadcrumb-item:hover {
+  color: #cfe0ff;
+  text-decoration: underline;
+}
+.breadcrumb-current {
+  color: #2ee6a6;
+  cursor: default;
+  font-weight: 600;
+}
+.breadcrumb-current:hover {
+  text-decoration: none;
+}
 .plot-canvas-container {
   flex: 1;
   position: relative;
@@ -349,4 +383,54 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+.modal-wide {
+  width: 360px;
+}
+.apply-gates-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.apply-gates-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.apply-gates-list input {
+  width: auto;
+  margin: 0;
+}
+.modal-empty,
+.modal-note {
+  font-size: 11.5px;
+  color: #8b93a1;
+  margin: 0 0 12px;
+}
+
+.btn-small {
+  font-size: 11px;
+  padding: 2px 7px;
+}
+
+.notice-banner {
+  margin-top: 8px;
+  background: rgba(46, 230, 166, 0.1);
+  border: 1px solid rgba(46, 230, 166, 0.35);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 12px;
+}
+.notice-banner pre {
+  white-space: pre-wrap;
+  margin: 0 0 6px;
+  color: #b7f5de;
+  font-family: inherit;
 }

@@ -15,7 +15,7 @@ function pointInPolygon(x: number, y: number, points: { x: number; y: number }[]
   return inside;
 }
 
-function testShape(shape: GateShape, xVal: number, yVal: number): boolean {
+export function shapeContainsPoint(shape: GateShape, xVal: number, yVal: number): boolean {
   switch (shape.kind) {
     case 'rectangle': {
       const xMin = Math.min(shape.x1, shape.x2);
@@ -31,7 +31,7 @@ function testShape(shape: GateShape, xVal: number, yVal: number): boolean {
   }
 }
 
-function ancestorChain(gates: Record<string, GateNode>, gateId: string): GateNode[] {
+export function ancestorChain(gates: Record<string, GateNode>, gateId: string): GateNode[] {
   const chain: GateNode[] = [];
   let cur: GateNode | undefined = gates[gateId];
   while (cur) {
@@ -56,7 +56,7 @@ export function getGateEventIndices(sample: Sample, gateId: string): Uint32Array
       const idx = candidates[i];
       const xv = xCol[idx];
       const yv = yCol ? yCol[idx] : 0;
-      if (testShape(shape, xv, yv)) next.push(idx);
+      if (shapeContainsPoint(shape, xv, yv)) next.push(idx);
     }
     candidates = Uint32Array.from(next);
   }

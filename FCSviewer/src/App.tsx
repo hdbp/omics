@@ -22,6 +22,14 @@ function App() {
       <div className="app-body">
         <aside className="sidebar">
           <FileLoader />
+          {state.notice && (
+            <div className="notice-banner">
+              <pre>{state.notice}</pre>
+              <button className="btn" onClick={state.clearNotice}>
+                Dismiss
+              </button>
+            </div>
+          )}
           <SampleList />
           {sample && <GateTree sample={sample} stats={stats} />}
         </aside>
