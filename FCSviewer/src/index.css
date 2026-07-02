@@ -1,0 +1,34 @@
+:root {
+  color-scheme: dark;
+  font: 14px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #16171d;
+  color: #e5e7eb;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+}
+
+select,
+input {
+  font: inherit;
+  background: #1f2028;
+  color: #e5e7eb;
+  border: 1px solid #3a3f4b;
+  border-radius: 4px;
+  padding: 3px 6px;
+}
