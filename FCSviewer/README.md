@@ -21,6 +21,7 @@ A lightweight, standalone viewer for flow cytometry `.fcs` files that mimics Flo
 - **Layout population statistics export** — **Export stats CSV** in the Layout toolbar writes one row per panel in the collage: sample, population path, event count, % of parent, % of total, and median of each axis parameter (using its custom label if set) — everything you need to caption a figure with real numbers.
 - **Choose which stats print under each Layout panel** — click **Stats ▾** on a Layout panel to pick which fields (population path, count, % parent, % total, median X, median Y) appear as a text line under its plot. Baked into **Export layout as PNG** too, so the exported figure carries the numbers, not just the plot.
 - **Light or dark background on export** — the app's own UI is always dark, but **Export layout as PNG** (in both a sample's workspace and the Layout) has a **Light bg / Dark bg** toggle next to it. Light re-renders the whole figure — panel chrome, axes, ticks, gate outlines, the stats badge — in publication-friendly colors (white background, dark text) instead of a screenshot of the dark UI; the density colormap and any custom gate colors are unchanged either way.
+- **Save/open a project, like an RStudio workspace** — **Save Project…** in the sidebar writes every loaded sample's *raw event data* plus its gates, panels, colors, axis labels, and stats-annotation positions, and the whole Layout collage, to a single `.fcsproj` file. **Open Project…** restores all of it exactly — you don't need the original `.fcs` files again to pick up where you left off.
 
 Not included in this version: compensation/spillover matrices and full biexponential/logicle transforms — the log option is a straight log10 (floored at 1), not FlowJo's logicle.
 
@@ -82,6 +83,7 @@ npm run desktop:build   # build the installer(s) for the OS you're running on
 15. Every panel shows a small **%parent/%total badge** on its plot — drag it (by clicking directly on the badge) to wherever it won't sit on top of your data; this is separate from dragging the panel itself, which only happens from the header.
 16. On a Layout panel, click **Stats ▾** to check/uncheck which fields (population path, count, %parent, %total, median X, median Y) show as a line of text under the plot — and in the exported PNG.
 17. Before exporting a PNG (sample workspace or Layout), pick **Light bg** or **Dark bg** next to the export button — Light re-renders the whole figure in white/dark-text for a publication-ready image, independent of the app's own (always-dark) interface.
+18. Click **Save Project…** at the top of the sidebar any time to download a `.fcsproj` file with everything currently loaded — samples' raw data, gates, panels, colors, custom axis labels, and the Layout collage. Later, click **Open Project…** and pick that file to restore the exact same workspace (confirms first if you already have samples loaded, since it replaces them).
 
 ## Project layout
 
@@ -99,7 +101,10 @@ src/
 │   ├── store.ts          zustand store: samples, gate trees, panels, Layout collage, UI selection
 │   ├── panelLayout.ts    Panel sizing constants + size-aware auto-layout (tree + grid) algorithms
 │   └── types.ts          Sample/Panel/LayoutItem data model (Panel and LayoutItem carry their own width/height)
+├── project/
+│   └── projectFile.ts      .fcsproj save/restore: JSON metadata header + raw float32 event-data columns, no base64 bloat
 ├── components/
+│   ├── ProjectControls.tsx Save/Open Project buttons (the whole workspace, à la an RStudio .RData workspace)
 │   ├── FileLoader.tsx      Drag-and-drop / file picker
 │   ├── SampleList.tsx      Loaded-sample switcher
 │   ├── GateTree.tsx        Gating hierarchy sidebar + "apply to other samples" trigger
@@ -118,6 +123,7 @@ src/
     ├── exportImage.ts     PNG layout export helper
     ├── theme.ts            Light/dark color palettes for PNG export
     ├── plotRender.ts       Re-renders a panel's plot onto an export canvas in either theme, independent of the live (always-dark) DOM canvas
+    ├── download.ts         Shared Blob-download helper
     └── id.ts               Shared unique-id generator
 
 src-tauri/                  Native desktop wrapper (Tauri) — config + a few lines of Rust; loads dist/ into an OS webview
@@ -134,3 +140,4 @@ src-tauri/                  Native desktop wrapper (Tauri) — config + a few li
 - No compensation (spillover matrix). The log axis option is a plain log10 transform floored at 1, not FlowJo's logicle/biexponential.
 - Very large files (multi-million events) parse and render on the main thread, so the UI may pause briefly while loading.
 - The desktop build isn't code-signed or notarized (no Apple Developer account configured) and uses placeholder icons — fine for internal/personal use, but a real release would want both before wide distribution.
+- `.fcsproj` is a custom format specific to this app (not a standard flow cytometry format), versioned internally — a project saved by a much newer/older build may refuse to open if the format changes. It embeds full event data, so file size is roughly the sum of the original `.fcs` files' sizes.

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useStore, getActiveSample } from './state/store';
+import { ProjectControls } from './components/ProjectControls';
 import { FileLoader } from './components/FileLoader';
 import { SampleList } from './components/SampleList';
 import { GateTree } from './components/GateTree';
@@ -23,6 +24,7 @@ function App() {
       </header>
       <div className="app-body">
         <aside className="sidebar">
+          <ProjectControls />
           <FileLoader />
           {state.notice && (
             <div className="notice-banner">

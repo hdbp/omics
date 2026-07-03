@@ -166,6 +166,14 @@ interface AppState {
   removeLayoutItem: (itemId: string) => void;
   autoArrangeLayout: () => void;
   focusLayoutItem: (itemId: string | null) => void;
+
+  /** Wholesale-replaces the workspace with a project restored from a saved .fcsproj file. */
+  loadProject: (project: {
+    samples: Sample[];
+    layoutItems: LayoutItem[];
+    activeSampleId: string | null;
+    mainView: 'samples' | 'layout';
+  }) => void;
 }
 
 function updateSample(samples: Sample[], sampleId: string, fn: (s: Sample) => Sample): Sample[] {
@@ -605,6 +613,19 @@ export const useStore = create<AppState>((set, get) => ({
     }),
 
   focusLayoutItem: (itemId) => set({ focusedLayoutItemId: itemId }),
+
+  loadProject: ({ samples, layoutItems, activeSampleId, mainView }) =>
+    set({
+      samples,
+      layoutItems,
+      activeSampleId,
+      mainView,
+      focusedPanelId: null,
+      focusedLayoutItemId: null,
+      loading: false,
+      error: null,
+      notice: null,
+    }),
 }));
 
 export function getActiveSample(state: AppState): Sample | null {

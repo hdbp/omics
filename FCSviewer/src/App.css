@@ -232,6 +232,10 @@
   gap: 4px;
 }
 
+.project-controls .btn-group {
+  flex-wrap: wrap;
+}
+
 /* Panel workspace (the multi-plot canvas that replaces a single plot view) */
 .panel-workspace-wrap {
   display: flex;
