@@ -5,6 +5,7 @@ A lightweight, standalone viewer for flow cytometry `.fcs` files that mimics Flo
 ## Features
 
 - **Load `.fcs` files** — drag-and-drop or file picker, multiple samples at once. Supports FCS 3.0/3.1 list-mode files with `INT`/`FLOAT`/`DOUBLE` data types and byte-aligned parameter widths (8/16/32/64-bit).
+- **Import straight from Dropbox** (optional) — an **Import from Dropbox…** button next to the dropzone opens Dropbox's own file picker and loads `.fcs` files directly into the browser, no download-then-upload round trip. Off by default; see "Cloud storage integration" below to turn it on. Files still go straight from Dropbox to your browser — this app has no server of its own to route them through.
 - **A workspace of linked plots, not one plot that swaps in place** — like FlowJo, each sample gets a canvas of "panels." Every panel is a dot plot or histogram bound permanently to one population, with its own X/Y axes, log/linear scale, and plot type.
 - **Gate, then drill down into a brand-new panel** — draw a rectangle/polygon gate on a panel (e.g. FSC-A vs SSC-A), then click the gated region to open it in a *new* panel, connected to its parent by a line. Pick different axes there (e.g. GFP vs BFP) and gate again — each drill-down spawns another linked panel, building out the full gating tree visually.
 - **Gates stay editable after you've drilled into them** — every rectangle/polygon/range gate shows small drag handles on the panel you drew it on. Drag a handle to reshape it, or drag its body to move it; any panel already drilled into that population (or a descendant of it) recomputes its events and stats live, no need to redraw or re-drill.
@@ -61,6 +62,20 @@ npm run desktop:build   # build the installer(s) for the OS you're running on
 
 **Building both without owning a Mac:** push a tag like `fcsviewer-v0.1.0`, or run the **FCS Viewer desktop build** workflow manually from the Actions tab — `.github/workflows/fcsviewer-desktop.yml` builds the macOS (universal, Intel + Apple Silicon) `.dmg` and the Linux `.deb`/`.AppImage` in parallel on GitHub's own macOS/Linux runners and uploads them as workflow artifacts (and as a draft GitHub Release when triggered by the tag). The macOS build isn't code-signed/notarized (no Apple Developer account configured), so first launch will need a right-click → **Open** to bypass Gatekeeper's "unidentified developer" warning.
 
+### Cloud storage integration (optional)
+
+The **Import from Dropbox…** button is hidden unless you configure a Dropbox app key — there's no shared/default key baked into the app, since Chooser keys are tied to specific domains.
+
+1. Create an app at [dropbox.com/developers/apps](https://www.dropbox.com/developers/apps) — "Scoped access", any access type (Chooser doesn't use API scopes).
+2. In the app's settings, under **Chooser/Saver/Embedder domains**, add every domain/port you'll run this from — `localhost:5173` for `npm run dev`, plus wherever you deploy the portable build. Chooser needs http(s); it won't work opening `dist/index.html` directly via `file://`, and (untested) may not work inside the Tauri desktop app's webview either, since Chooser opens a popup window.
+3. Copy the app key from the app's settings page into `FCSviewer/.env.local` (gitignored — never commit a real key):
+   ```
+   VITE_DROPBOX_APP_KEY=your-app-key-here
+   ```
+4. Restart `npm run dev` (Vite only reads `.env*` files at startup) — the button appears once a key is present.
+
+Google Drive and OneDrive aren't wired up yet; Dropbox was the simplest to start with since its Chooser widget needs no OAuth redirect URI (unlike Drive's Picker or OneDrive's picker SDK), which fits a purely static app that might be opened from any URL.
+
 ## Usage
 
 1. Drop one or more `.fcs` files onto the panel on the left (or click it to browse). Each sample opens with one root panel showing all events.
@@ -84,6 +99,7 @@ npm run desktop:build   # build the installer(s) for the OS you're running on
 16. On a Layout panel, click **Stats ▾** to check/uncheck which fields (population path, count, %parent, %total, median X, median Y) show as a line of text under the plot — and in the exported PNG.
 17. Before exporting a PNG (sample workspace or Layout), pick **Light bg** or **Dark bg** next to the export button — Light re-renders the whole figure in white/dark-text for a publication-ready image, independent of the app's own (always-dark) interface.
 18. Click **Save Project…** at the top of the sidebar any time to download a `.fcsproj` file with everything currently loaded — samples' raw data, gates, panels, colors, custom axis labels, and the Layout collage. Later, click **Open Project…** and pick that file to restore the exact same workspace (confirms first if you already have samples loaded, since it replaces them).
+19. If you've configured a Dropbox app key (see "Cloud storage integration"), click **Import from Dropbox…** next to the dropzone to pick `.fcs` files straight out of your Dropbox instead of downloading them first.
 
 ## Project layout
 
@@ -103,6 +119,8 @@ src/
 │   └── types.ts          Sample/Panel/LayoutItem data model (Panel and LayoutItem carry their own width/height)
 ├── project/
 │   └── projectFile.ts      .fcsproj save/restore: JSON metadata header + raw float32 event-data columns, no base64 bloat
+├── integrations/
+│   └── dropbox.ts          Dropbox Chooser: script loading + a Promise wrapper around the popup file picker
 ├── components/
 │   ├── ProjectControls.tsx Save/Open Project buttons (the whole workspace, à la an RStudio .RData workspace)
 │   ├── FileLoader.tsx      Drag-and-drop / file picker
@@ -139,5 +157,6 @@ src-tauri/                  Native desktop wrapper (Tauri) — config + a few li
 - There's no shared "workspace" gating tree that stays synchronized across samples — "Apply to other samples" is a one-time copy (of both gates and panel layout); editing gates afterward on one sample doesn't propagate to the others.
 - No compensation (spillover matrix). The log axis option is a plain log10 transform floored at 1, not FlowJo's logicle/biexponential.
 - Very large files (multi-million events) parse and render on the main thread, so the UI may pause briefly while loading.
+- Dropbox import is untested inside the Tauri desktop build — Chooser opens a popup window, which webviews don't always handle the same way browsers do. Google Drive/OneDrive aren't implemented yet.
 - The desktop build isn't code-signed or notarized (no Apple Developer account configured) and uses placeholder icons — fine for internal/personal use, but a real release would want both before wide distribution.
 - `.fcsproj` is a custom format specific to this app (not a standard flow cytometry format), versioned internally — a project saved by a much newer/older build may refuse to open if the format changes. It embeds full event data, so file size is roughly the sum of the original `.fcs` files' sizes.

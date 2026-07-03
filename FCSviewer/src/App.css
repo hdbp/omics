@@ -83,6 +83,11 @@
   color: #c7cdd6;
 }
 
+.btn-cloud-import {
+  width: 100%;
+  margin-top: 8px;
+}
+
 .error-banner {
   margin-top: 8px;
   background: rgba(255, 80, 80, 0.1);
