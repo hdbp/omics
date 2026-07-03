@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { parseFCS, FCSParseError } from '../fcs/parseFCS';
 import { makeRootGate, ROOT_GATE_ID } from '../gating/gateTypes';
-import type { GateShape } from '../gating/gateTypes';
+import type { GateShape, QuadrantId } from '../gating/gateTypes';
 import { getDescendantIds } from '../gating/gateEval';
 import { cloneGateTree } from '../gating/gateClone';
 import { makeId } from '../utils/id';
@@ -9,12 +9,60 @@ import { nextPanelPosition, autoArrangeAll } from './panelLayout';
 import type { Sample, Panel } from './types';
 import type { FCSParameter } from '../fcs/types';
 
+const QUADRANT_IDS: QuadrantId[] = ['UL', 'UR', 'LL', 'LR'];
+
+function quadrantName(xParam: string, yParam: string, quadrant: QuadrantId): string {
+  const xSign = quadrant === 'UR' || quadrant === 'LR' ? '+' : '-';
+  const ySign = quadrant === 'UR' || quadrant === 'UL' ? '+' : '-';
+  return `${xParam}${xSign} ${yParam}${ySign}`;
+}
+
 function pickDefaultAxes(parameters: FCSParameter[], avoid: string[]): [string, string] {
   const names = parameters.map((p) => p.name);
   const candidates = names.filter((n) => !avoid.includes(n));
   const x = candidates[0] ?? names[0] ?? '';
   const y = candidates[1] ?? candidates[0] ?? names[1] ?? names[0] ?? '';
   return [x, y];
+}
+
+/**
+ * Clones a sample's panel layout onto another sample, remapping gate ids via
+ * the map returned by cloneGateTree. A panel is dropped if its population
+ * didn't survive cloning (missing parameter along its ancestry); a surviving
+ * panel whose own axis choice references a parameter the target lacks falls
+ * back to a default axis rather than referencing a nonexistent column.
+ */
+function clonePanels(
+  sourcePanels: Panel[],
+  gateIdMap: Map<string, string>,
+  targetParamIndex: Record<string, number>,
+  targetParameters: FCSParameter[]
+): Panel[] {
+  const panelIdMap = new Map<string, string>();
+  const panels: Panel[] = [];
+  for (const src of sourcePanels) {
+    const newGateId = gateIdMap.get(src.gateId);
+    if (!newGateId) continue;
+    const newParentPanelId = src.parentPanelId ? (panelIdMap.get(src.parentPanelId) ?? null) : null;
+    const xOk = targetParamIndex[src.xParam] !== undefined;
+    const yOk = targetParamIndex[src.yParam] !== undefined;
+    const [fallbackX, fallbackY] = pickDefaultAxes(targetParameters, []);
+    const panel: Panel = {
+      id: makeId('panel'),
+      gateId: newGateId,
+      parentPanelId: newParentPanelId,
+      xParam: xOk ? src.xParam : fallbackX,
+      yParam: yOk ? src.yParam : fallbackY,
+      plotType: src.plotType,
+      xLogScale: src.xLogScale,
+      yLogScale: src.yLogScale,
+      x: src.x,
+      y: src.y,
+    };
+    panelIdMap.set(src.id, panel.id);
+    panels.push(panel);
+  }
+  return panels.length > 0 ? panels : [createRootPanel(targetParameters)];
 }
 
 function createRootPanel(parameters: FCSParameter[]): Panel {
@@ -61,6 +109,10 @@ interface AppState {
   focusPanel: (panelId: string | null) => void;
 
   addGate: (sampleId: string, parentId: string, name: string, shape: GateShape) => string;
+  /** Creates the 4 quadrant child gates atomically (shared groupId, auto-named). */
+  addQuadrantGates: (sampleId: string, parentId: string, xParam: string, yParam: string, x: number, y: number) => void;
+  /** Live-updates the shared crosshair position for all 4 gates in a quadrant group. */
+  updateQuadrantPosition: (sampleId: string, groupId: string, x: number, y: number) => void;
   renameGate: (sampleId: string, gateId: string, name: string) => void;
   deleteGate: (sampleId: string, gateId: string) => void;
 
@@ -257,6 +309,42 @@ export const useStore = create<AppState>((set, get) => ({
     return gateId;
   },
 
+  addQuadrantGates: (sampleId, parentId, xParam, yParam, x, y) => {
+    const groupId = makeId('quad');
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => {
+        const gates = { ...s.gates };
+        const newIds: string[] = [];
+        for (const quadrant of QUADRANT_IDS) {
+          const gateId = makeId('gate');
+          gates[gateId] = {
+            id: gateId,
+            name: quadrantName(xParam, yParam, quadrant),
+            parentId,
+            shape: { kind: 'quadrant', xParam, yParam, x, y, quadrant, groupId },
+            childIds: [],
+          };
+          newIds.push(gateId);
+        }
+        gates[parentId] = { ...gates[parentId], childIds: [...gates[parentId].childIds, ...newIds] };
+        return { ...s, gates };
+      }),
+    }));
+  },
+
+  updateQuadrantPosition: (sampleId, groupId, x, y) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => {
+        const gates = { ...s.gates };
+        for (const [id, node] of Object.entries(gates)) {
+          if (node.shape?.kind === 'quadrant' && node.shape.groupId === groupId) {
+            gates[id] = { ...node, shape: { ...node.shape, x, y } };
+          }
+        }
+        return { ...s, gates };
+      }),
+    })),
+
   renameGate: (sampleId, gateId, name) =>
     set((state) => ({
       samples: updateSample(state.samples, sampleId, (s) => ({
@@ -307,17 +395,17 @@ export const useStore = create<AppState>((set, get) => ({
     set((state) => ({
       samples: state.samples.map((s) => {
         if (!targetSampleIds.includes(s.id)) return s;
-        const { gates, skipped } = cloneGateTree(source.gates, s.paramIndex);
+        const { gates, skipped, idMap } = cloneGateTree(source.gates, s.paramIndex);
         if (skipped.length > 0) {
           noticeLines.push(`${targetNames.get(s.id) ?? s.id}: skipped ${skipped.join(', ')} (parameter not found)`);
         }
-        // Old panels reference gate ids from the previous tree, which no longer exist; start fresh.
-        return { ...s, gates, panels: [createRootPanel(s.parameters)] };
+        const panels = clonePanels(source.panels, idMap, s.paramIndex, s.parameters);
+        return { ...s, gates, panels };
       }),
     }));
 
     const appliedCount = targetSampleIds.length;
-    const summary = `Applied gating strategy from "${source.fileName}" to ${appliedCount} sample${appliedCount === 1 ? '' : 's'}.`;
+    const summary = `Applied gating strategy and panel layout from "${source.fileName}" to ${appliedCount} sample${appliedCount === 1 ? '' : 's'}.`;
     set({ notice: noticeLines.length > 0 ? `${summary}\n${noticeLines.join('\n')}` : summary });
   },
 }));

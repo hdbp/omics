@@ -28,7 +28,24 @@ export interface RangeGateShape {
   max: number;
 }
 
-export type GateShape = RectangleGateShape | PolygonGateShape | RangeGateShape;
+export type QuadrantId = 'UL' | 'UR' | 'LL' | 'LR';
+
+/**
+ * One quarter of a quadrant gate: a crosshair at (x, y) splits the plot into
+ * four unbounded regions. All four siblings from one placement share
+ * `groupId` and the same (x, y), so dragging one moves all four together.
+ */
+export interface QuadrantGateShape {
+  kind: 'quadrant';
+  xParam: string;
+  yParam: string;
+  x: number;
+  y: number;
+  quadrant: QuadrantId;
+  groupId: string;
+}
+
+export type GateShape = RectangleGateShape | PolygonGateShape | RangeGateShape | QuadrantGateShape;
 
 export interface GateNode {
   id: string;

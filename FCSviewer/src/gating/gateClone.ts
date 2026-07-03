@@ -9,6 +9,8 @@ export interface CloneResult {
   gates: Record<string, GateNode>;
   /** Names of gates (with their ancestor path) that were skipped because a required parameter was missing. */
   skipped: string[];
+  /** Old gate id -> new gate id, for remapping anything else (e.g. panels) that references gate ids. */
+  idMap: Map<string, string>;
 }
 
 /**
@@ -47,5 +49,5 @@ export function cloneGateTree(
   }
 
   visit(ROOT_GATE_ID, '');
-  return { gates, skipped };
+  return { gates, skipped, idMap };
 }

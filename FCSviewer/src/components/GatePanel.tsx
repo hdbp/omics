@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { getColumn, type Sample, type Panel } from '../state/types';
 import { ancestorChain, getGateEventIndices, shapeContainsPoint } from '../gating/gateEval';
-import type { GateShape, Point } from '../gating/gateTypes';
+import type { GateShape, Point, QuadrantId } from '../gating/gateTypes';
 import {
   makeScale,
   toRange,
@@ -17,10 +17,11 @@ import { densityColor } from '../utils/colormap';
 import { GateNameDialog } from './GateNameDialog';
 import { PANEL_WIDTH, PANEL_HEIGHT } from '../state/panelLayout';
 
-type Mode = 'none' | 'rectangle' | 'polygon' | 'range';
+type Mode = 'none' | 'rectangle' | 'polygon' | 'range' | 'quadrant';
 
 const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
 const CLOSE_RADIUS_PX = 9;
+const QUADRANT_LABEL_OFFSET = 6;
 
 function paramRange(sample: Sample, name: string): number {
   return sample.parameters.find((p) => p.name === name)?.range ?? 1;
@@ -36,8 +37,16 @@ interface Props {
 }
 
 export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegisterCanvas, onRegisterRoot }: Props) {
-  const { updatePanelAxis, updatePanelPlotType, updatePanelLogScale, addGate, addChildPanel, removePanel } =
-    useStore();
+  const {
+    updatePanelAxis,
+    updatePanelPlotType,
+    updatePanelLogScale,
+    addGate,
+    addQuadrantGates,
+    updateQuadrantPosition,
+    addChildPanel,
+    removePanel,
+  } = useStore();
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -47,6 +56,9 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
   const [rangeDraft, setRangeDraft] = useState<{ min: number; max: number } | null>(null);
   const [polyPoints, setPolyPoints] = useState<Point[]>([]);
   const [cursorData, setCursorData] = useState<Point | null>(null);
+  const [quadrantDraft, setQuadrantDraft] = useState<Point | null>(null);
+  const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
+  const suppressNextClick = useRef(false);
   const [pendingShape, setPendingShape] = useState<GateShape | null>(null);
   const [drawing, setDrawing] = useState(false);
 
@@ -89,6 +101,7 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
         setRectDraft(null);
         setRangeDraft(null);
         setPolyPoints([]);
+        setQuadrantDraft(null);
         setPendingShape(null);
         setDrawing(false);
       }
@@ -106,9 +119,24 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     setRectDraft(null);
     setRangeDraft(null);
     setPolyPoints([]);
+    setQuadrantDraft(null);
+    setDraggingGroupId(null);
     setPendingShape(null);
     setDrawing(false);
   }, [panel.xParam, panel.yParam, panel.plotType, xLog, yLog]);
+
+  // Distinct quadrant-gate groups (crosshair placements) among this panel's own child gates.
+  const quadrantGroups = useMemo(() => {
+    const groups = new Map<string, { x: number; y: number; labels: Partial<Record<QuadrantId, string>> }>();
+    for (const childId of gateNode?.childIds ?? []) {
+      const shape = sample.gates[childId]?.shape;
+      if (shape?.kind !== 'quadrant' || shape.xParam !== panel.xParam || shape.yParam !== panel.yParam) continue;
+      const group = groups.get(shape.groupId) ?? { x: shape.x, y: shape.y, labels: {} };
+      group.labels[shape.quadrant] = sample.gates[childId].name;
+      groups.set(shape.groupId, group);
+    }
+    return groups;
+  }, [sample.gates, gateNode, panel.xParam, panel.yParam]);
 
   const indices = useMemo(() => getGateEventIndices(sample, panel.gateId), [sample, panel.gateId]);
 
@@ -284,13 +312,23 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
       if (shape.kind === 'range' && panel.plotType === 'histogram' && shape.param === panel.xParam) {
         drawRangeOverlay(ctx, xToPx, shape.min, shape.max, MARGIN.top, plotHeight, child.name, false);
       } else if (
-        shape.kind !== 'range' &&
+        (shape.kind === 'rectangle' || shape.kind === 'polygon') &&
         panel.plotType === 'scatter' &&
         shape.xParam === panel.xParam &&
         shape.yParam === panel.yParam
       ) {
         drawShapeOverlay(ctx, xToPx, yToPx, shape, child.name, false);
       }
+    }
+
+    if (panel.plotType === 'scatter') {
+      for (const group of quadrantGroups.values()) {
+        drawQuadrantCrosshair(ctx, xToPx, yToPx, group.x, group.y, group.labels, false);
+      }
+    }
+
+    if (mode === 'quadrant' && quadrantDraft) {
+      drawQuadrantCrosshair(ctx, xToPx, yToPx, quadrantDraft.x, quadrantDraft.y, null, true);
     }
 
     if (mode === 'rectangle' && rectDraft) {
@@ -408,6 +446,39 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     }
   }
 
+  function drawQuadrantCrosshair(
+    ctx: CanvasRenderingContext2D,
+    xPx: (raw: number) => number,
+    yPx: (raw: number) => number,
+    x: number,
+    y: number,
+    labels: Partial<Record<QuadrantId, string>> | null,
+    isDraft: boolean
+  ) {
+    const px = xPx(x);
+    const py = yPx(y);
+    ctx.strokeStyle = isDraft ? '#ff9f1c' : '#2ee6a6';
+    ctx.lineWidth = 1.25;
+    ctx.setLineDash(isDraft ? [5, 3] : []);
+    ctx.beginPath();
+    ctx.moveTo(px, MARGIN.top);
+    ctx.lineTo(px, MARGIN.top + plotHeight);
+    ctx.moveTo(MARGIN.left, py);
+    ctx.lineTo(MARGIN.left + plotWidth, py);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (labels) {
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.fillStyle = '#2ee6a6';
+      ctx.textAlign = 'right';
+      if (labels.UL) ctx.fillText(labels.UL, px - QUADRANT_LABEL_OFFSET, MARGIN.top + 10);
+      if (labels.LL) ctx.fillText(labels.LL, px - QUADRANT_LABEL_OFFSET, MARGIN.top + plotHeight - 4);
+      ctx.textAlign = 'left';
+      if (labels.UR) ctx.fillText(labels.UR, px + QUADRANT_LABEL_OFFSET, MARGIN.top + 10);
+      if (labels.LR) ctx.fillText(labels.LR, px + QUADRANT_LABEL_OFFSET, MARGIN.top + plotHeight - 4);
+    }
+  }
+
   function getMouseData(e: React.MouseEvent<HTMLCanvasElement>): Point {
     const rect = canvasRef.current!.getBoundingClientRect();
     const px = e.clientX - rect.left;
@@ -420,14 +491,32 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
+  function findNearbyQuadrantGroup(e: React.MouseEvent<HTMLCanvasElement>): string | null {
+    if (panel.plotType !== 'scatter') return null;
+    const px = getMousePx(e);
+    for (const [groupId, group] of quadrantGroups) {
+      const gx = xToPx(group.x);
+      const gy = yToPx(group.y);
+      if (Math.hypot(px.x - gx, px.y - gy) <= CLOSE_RADIUS_PX + 3) return groupId;
+    }
+    return null;
+  }
+
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (mode === 'none') return;
+    if (mode === 'none') {
+      const groupId = findNearbyQuadrantGroup(e);
+      if (groupId) setDraggingGroupId(groupId);
+      return;
+    }
     const data = getMouseData(e);
     if (mode === 'rectangle') {
       setRectDraft({ x1: data.x, y1: data.y, x2: data.x, y2: data.y });
       setDrawing(true);
     } else if (mode === 'range') {
       setRangeDraft({ min: data.x, max: data.x });
+      setDrawing(true);
+    } else if (mode === 'quadrant') {
+      setQuadrantDraft({ x: data.x, y: data.y });
       setDrawing(true);
     } else if (mode === 'polygon') {
       if (polyPoints.length >= 3) {
@@ -445,6 +534,11 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
   }
 
   function handleMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (draggingGroupId) {
+      const data = getMouseData(e);
+      updateQuadrantPosition(sample.id, draggingGroupId, data.x, data.y);
+      return;
+    }
     if (mode === 'polygon' && polyPoints.length > 0) {
       setCursorData(getMouseData(e));
     }
@@ -454,10 +548,17 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
       setRectDraft({ ...rectDraft, x2: data.x, y2: data.y });
     } else if (mode === 'range' && rangeDraft) {
       setRangeDraft({ ...rangeDraft, max: data.x });
+    } else if (mode === 'quadrant') {
+      setQuadrantDraft({ x: data.x, y: data.y });
     }
   }
 
   function handleMouseUp() {
+    if (draggingGroupId) {
+      setDraggingGroupId(null);
+      suppressNextClick.current = true;
+      return;
+    }
     if (!drawing) return;
     setDrawing(false);
     if (mode === 'rectangle' && rectDraft) {
@@ -472,6 +573,10 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
       } else {
         setRangeDraft(null);
       }
+    } else if (mode === 'quadrant' && quadrantDraft) {
+      addQuadrantGates(sample.id, panel.gateId, panel.xParam, panel.yParam, quadrantDraft.x, quadrantDraft.y);
+      setQuadrantDraft(null);
+      setMode('none');
     }
   }
 
@@ -484,6 +589,10 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
   // Clicking directly on an existing child gate's shape (outside of drawing mode) drills down,
   // opening (or focusing) a brand-new panel for that population.
   function handleClick(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (suppressNextClick.current) {
+      suppressNextClick.current = false;
+      return;
+    }
     if (mode !== 'none') return;
     const data = getMouseData(e);
     for (const childId of gateNode?.childIds ?? []) {
@@ -611,6 +720,13 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
               >
                 ⬠
               </button>
+              <button
+                className={`btn btn-small ${mode === 'quadrant' ? 'btn-active' : ''}`}
+                title="Quadrant gate: click-drag to place a crosshair, splitting the plot into 4 populations"
+                onClick={() => setMode(mode === 'quadrant' ? 'none' : 'quadrant')}
+              >
+                ✛
+              </button>
             </>
           ) : (
             <button
@@ -628,6 +744,7 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
                 setRectDraft(null);
                 setRangeDraft(null);
                 setPolyPoints([]);
+                setQuadrantDraft(null);
               }}
             >
               Cancel
@@ -639,7 +756,11 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
       {mode === 'polygon' && (
         <div className="hint">Click vertices; click near the first, dbl-click, or Enter to close.</div>
       )}
-      {mode === 'none' && (gateNode?.childIds.length ?? 0) > 0 && (
+      {mode === 'quadrant' && <div className="hint">Click-drag to place the crosshair; release to create 4 gates.</div>}
+      {mode === 'none' && quadrantGroups.size > 0 && (
+        <div className="hint hint-subtle">Drag a crosshair intersection to reposition its 4 quadrants.</div>
+      )}
+      {mode === 'none' && quadrantGroups.size === 0 && (gateNode?.childIds.length ?? 0) > 0 && (
         <div className="hint hint-subtle">Click a gated region to open it in a new panel.</div>
       )}
       <div className="plot-canvas-container" ref={containerRef}>
@@ -650,7 +771,7 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
           onMouseUp={handleMouseUp}
           onDoubleClick={handleDoubleClick}
           onClick={handleClick}
-          style={{ cursor: mode !== 'none' ? 'crosshair' : 'pointer' }}
+          style={{ cursor: draggingGroupId ? 'grabbing' : mode !== 'none' ? 'crosshair' : 'pointer' }}
         />
       </div>
       {pendingShape && (

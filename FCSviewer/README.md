@@ -8,8 +8,9 @@ A lightweight, standalone, in-browser viewer for flow cytometry `.fcs` files tha
 - **A workspace of linked plots, not one plot that swaps in place** — like FlowJo, each sample gets a canvas of "panels." Every panel is a dot plot or histogram bound permanently to one population, with its own X/Y axes, log/linear scale, and plot type.
 - **Gate, then drill down into a brand-new panel** — draw a rectangle/polygon gate on a panel (e.g. FSC-A vs SSC-A), then click the gated region to open it in a *new* panel, connected to its parent by a line. Pick different axes there (e.g. GFP vs BFP) and gate again — each drill-down spawns another linked panel, building out the full gating tree visually.
 - **Rearrange and export the layout** — drag any panel by its header to reposition it, click **Auto-arrange** to snap back to a clean tree layout, and **Export layout as PNG** to save the whole assembled panel-and-connector diagram as one image.
+- **Quadrant gates** — click-drag to place a crosshair on a dot plot, splitting it into 4 populations (auto-named by +/- for each axis) with a single gesture. Drag the crosshair intersection afterward to reposition all 4 at once — every quadrant is a regular gate, so it gets its own row (count, %parent, %total, median) in the statistics table and can itself be drilled into.
 - **Log axis scale** — toggle **log X** / **log Y** per panel independently (log10, floored at 1) — useful for fluorescence channels that are hard to read on a linear scale.
-- **Apply a gating strategy to other samples** — clone the active sample's entire gate hierarchy onto other loaded samples in one step. Gates that depend on a parameter missing from a target sample are skipped (with a summary of what was skipped), rather than applied broken.
+- **Apply a gating strategy to other samples** — clone the active sample's entire gate hierarchy *and panel layout* onto other loaded samples in one step: the same chain of linked panels (axes, plot type, log scale, position) is recreated on each target, recomputed against its own data. Gates/panels that depend on a parameter missing from a target sample are skipped (with a summary of what was skipped), rather than applied broken.
 - **Statistics table** — count, % of parent, % of total, and median (for two parameters you choose) for every gate across the whole sample, live-updating as you gate. Export the table, or any single population's raw events, as CSV.
 
 Not included in this version: compensation/spillover matrices and full biexponential/logicle transforms — the log option is a straight log10 (floored at 1), not FlowJo's logicle.
@@ -33,15 +34,16 @@ npm run preview # serve the production build locally
 
 1. Drop one or more `.fcs` files onto the panel on the left (or click it to browse). Each sample opens with one root panel showing all events.
 2. In a panel, pick X/Y parameters from its dropdowns, switch between **Dot plot** and **Histogram**, and toggle **log X**/**log Y** as needed.
-3. Click the **▭** (rectangle), **⬠** (polygon), or **↔** (range, histogram only) button, then draw on that panel's plot:
+3. Click the **▭** (rectangle), **⬠** (polygon), **✛** (quadrant), or **↔** (range, histogram only) button, then draw on that panel's plot:
    - Rectangle/range: click-drag.
    - Polygon: click to add each vertex, then click near the first vertex, double-click, or press <kbd>Enter</kbd> to close it. <kbd>Esc</kbd> cancels.
-4. Name the gate when prompted. Its outline appears on the panel you drew it on.
-5. **Click inside the gated region** (with no drawing tool active) to drill down — this opens a *new panel* for that population, connected to the one you drew from, with fresh default axes so you can immediately pick different channels (e.g. GFP/BFP). Repeat to build out the full gating tree as a chain of linked panels.
+   - Quadrant (dot plots only): click-drag to place the crosshair, release to instantly create all 4 quadrant gates (auto-named, no dialog). Afterward, drag the crosshair intersection again (with no tool active) to reposition all 4 together — stats update live.
+4. For rectangle/polygon/range gates, name the gate when prompted; its outline appears on the panel you drew it on.
+5. **Click inside a gated region** (with no drawing tool active) to drill down — this opens a *new panel* for that population, connected to the one you drew from, with fresh default axes so you can immediately pick different channels (e.g. GFP/BFP). Works for quadrant regions too. Repeat to build out the full gating tree as a chain of linked panels.
 6. Drag a panel by its header to move it; click **Auto-arrange** to lay everything out cleanly again; click **Export layout as PNG** to save the whole diagram as an image.
 7. You can also open/focus a gate's panel from the **Gating hierarchy** tree in the sidebar (creating one if it doesn't have a panel open yet), and double-click a gate's name there to rename it.
-8. Once you've built a gating hierarchy on one sample, click **Apply to other samples…** in the Gating hierarchy panel to copy the whole strategy onto other loaded samples (this replaces their existing gates and panels).
-9. In the **Statistics** panel at the bottom, pick which two parameters to show medians for, then **Export stats CSV** for the whole table or the ⭳ button on any row to export that population's raw events as CSV.
+8. Once you've built a gating hierarchy on one sample, click **Apply to other samples…** in the Gating hierarchy panel to copy the whole strategy — gates *and* the panel layout that views them — onto other loaded samples (this replaces their existing gates and panels).
+9. In the **Statistics** panel at the bottom, pick which two parameters to show medians for, then **Export stats CSV** for the whole table (every gate, including each quadrant) or the ⭳ button on any row to export that population's raw events as CSV.
 
 ## Project layout
 
@@ -51,10 +53,10 @@ src/
 │   ├── parseFCS.ts      FCS 3.0/3.1 binary parser (HEADER/TEXT/DATA segments)
 │   └── types.ts
 ├── gating/
-│   ├── gateTypes.ts      Gate shape/node types (rectangle, polygon, range)
+│   ├── gateTypes.ts      Gate shape/node types (rectangle, polygon, range, quadrant)
 │   ├── gateEval.ts       Point-in-gate tests, ancestor-chain evaluation
 │   ├── gateStats.ts      Per-gate count/%/median statistics
-│   └── gateClone.ts      Clones a gate hierarchy onto another sample's parameters
+│   └── gateClone.ts      Clones a gate hierarchy (+ id map) onto another sample's parameters
 ├── state/
 │   ├── store.ts          zustand store: samples, gate trees, panels, UI selection
 │   ├── panelLayout.ts    Panel sizing constants + auto-layout (tree) algorithm
@@ -78,6 +80,6 @@ src/
 
 ## Known limitations
 
-- There's no shared "workspace" gating tree that stays synchronized across samples — "Apply to other samples" is a one-time copy; editing gates afterward on one sample doesn't propagate to the others.
+- There's no shared "workspace" gating tree that stays synchronized across samples — "Apply to other samples" is a one-time copy (of both gates and panel layout); editing gates afterward on one sample doesn't propagate to the others.
 - No compensation (spillover matrix). The log axis option is a plain log10 transform floored at 1, not FlowJo's logicle/biexponential.
 - Very large files (multi-million events) parse and render on the main thread, so the UI may pause briefly while loading.

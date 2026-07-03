@@ -28,6 +28,20 @@ export function shapeContainsPoint(shape: GateShape, xVal: number, yVal: number)
       return pointInPolygon(xVal, yVal, shape.points);
     case 'range':
       return xVal >= Math.min(shape.min, shape.max) && xVal <= Math.max(shape.min, shape.max);
+    case 'quadrant': {
+      const right = xVal >= shape.x;
+      const above = yVal >= shape.y;
+      switch (shape.quadrant) {
+        case 'UR':
+          return right && above;
+        case 'UL':
+          return !right && above;
+        case 'LL':
+          return !right && !above;
+        case 'LR':
+          return right && !above;
+      }
+    }
   }
 }
 
