@@ -125,6 +125,7 @@ export function GatePanel({
     updatePanelAxis,
     updatePanelPlotType,
     updatePanelLogScale,
+    updatePanelAxisLabel,
     addGate,
     addQuadrantGates,
     updateQuadrantPosition,
@@ -366,11 +367,15 @@ export function GatePanel({
     ctx.textAlign = 'center';
     ctx.fillStyle = '#c7cdd6';
     ctx.font = '11px system-ui, sans-serif';
-    ctx.fillText(panel.xParam + (xLog ? ' (log)' : ''), MARGIN.left + plotWidth / 2, size.height - 6);
+    ctx.fillText((panel.xAxisLabel || panel.xParam) + (xLog ? ' (log)' : ''), MARGIN.left + plotWidth / 2, size.height - 6);
     ctx.save();
     ctx.translate(12, MARGIN.top + plotHeight / 2);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillText(panel.plotType === 'histogram' ? 'Count' : panel.yParam + (yLog ? ' (log)' : ''), 0, 0);
+    ctx.fillText(
+      panel.plotType === 'histogram' ? 'Count' : (panel.yAxisLabel || panel.yParam) + (yLog ? ' (log)' : ''),
+      0,
+      0
+    );
     ctx.restore();
 
     ctx.save();
@@ -929,6 +934,14 @@ export function GatePanel({
             ))}
           </select>
         </label>
+        <input
+          className="axis-label-input"
+          type="text"
+          placeholder={panel.xParam}
+          value={panel.xAxisLabel ?? ''}
+          title="Custom X axis label (e.g. type GFP to replace the laser name)"
+          onChange={(e) => updatePanelAxisLabel(sample.id, panel.id, 'xAxisLabel', e.target.value || null)}
+        />
         <button
           className={`btn btn-small ${xLog ? 'btn-active' : ''}`}
           title="Toggle logarithmic X axis"
@@ -948,6 +961,14 @@ export function GatePanel({
                 ))}
               </select>
             </label>
+            <input
+              className="axis-label-input"
+              type="text"
+              placeholder={panel.yParam}
+              value={panel.yAxisLabel ?? ''}
+              title="Custom Y axis label (e.g. type BFP to replace the laser name)"
+              onChange={(e) => updatePanelAxisLabel(sample.id, panel.id, 'yAxisLabel', e.target.value || null)}
+            />
             <button
               className={`btn btn-small ${yLog ? 'btn-active' : ''}`}
               title="Toggle logarithmic Y axis"

@@ -65,6 +65,9 @@ function clonePanels(
       plotType: src.plotType,
       xLogScale: src.xLogScale,
       yLogScale: src.yLogScale,
+      // A custom axis label only makes sense next to the parameter it was written for.
+      xAxisLabel: xOk ? src.xAxisLabel : undefined,
+      yAxisLabel: yOk ? src.yAxisLabel : undefined,
       x: src.x,
       y: src.y,
       width: src.width,
@@ -119,6 +122,8 @@ interface AppState {
   updatePanelAxis: (sampleId: string, panelId: string, axis: 'xParam' | 'yParam', value: string) => void;
   updatePanelPlotType: (sampleId: string, panelId: string, plotType: 'scatter' | 'histogram') => void;
   updatePanelLogScale: (sampleId: string, panelId: string, axis: 'xLogScale' | 'yLogScale', value: boolean) => void;
+  /** Display-text override for an axis (e.g. "GFP"); pass null to revert to the parameter's own name. */
+  updatePanelAxisLabel: (sampleId: string, panelId: string, axis: 'xAxisLabel' | 'yAxisLabel', label: string | null) => void;
   movePanel: (sampleId: string, panelId: string, x: number, y: number) => void;
   resizePanel: (sampleId: string, panelId: string, width: number, height: number) => void;
   removePanel: (sampleId: string, panelId: string) => void;
@@ -146,6 +151,7 @@ interface AppState {
   addToLayout: (sampleId: string, panelId: string) => string;
   updateLayoutItemAxis: (itemId: string, axis: 'xParam' | 'yParam', value: string) => void;
   updateLayoutItemPlotType: (itemId: string, plotType: 'scatter' | 'histogram') => void;
+  updateLayoutItemAxisLabel: (itemId: string, axis: 'xAxisLabel' | 'yAxisLabel', label: string | null) => void;
   updateLayoutItemLogScale: (itemId: string, axis: 'xLogScale' | 'yLogScale', value: boolean) => void;
   relabelLayoutItem: (itemId: string, label: string) => void;
   moveLayoutItem: (itemId: string, x: number, y: number) => void;
@@ -251,6 +257,14 @@ export const useStore = create<AppState>((set, get) => ({
       samples: updateSample(state.samples, sampleId, (s) => ({
         ...s,
         panels: s.panels.map((p) => (p.id === panelId ? { ...p, [axis]: value } : p)),
+      })),
+    })),
+
+  updatePanelAxisLabel: (sampleId, panelId, axis, label) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => ({
+        ...s,
+        panels: s.panels.map((p) => (p.id === panelId ? { ...p, [axis]: label ?? undefined } : p)),
       })),
     })),
 
@@ -504,6 +518,8 @@ export const useStore = create<AppState>((set, get) => ({
         plotType: panel.plotType,
         xLogScale: panel.xLogScale,
         yLogScale: panel.yLogScale,
+        xAxisLabel: panel.xAxisLabel,
+        yAxisLabel: panel.yAxisLabel,
         x: pos.x,
         y: pos.y,
         width: panel.width,
@@ -524,6 +540,11 @@ export const useStore = create<AppState>((set, get) => ({
   updateLayoutItemPlotType: (itemId, plotType) =>
     set((state) => ({
       layoutItems: state.layoutItems.map((it) => (it.id === itemId ? { ...it, plotType } : it)),
+    })),
+
+  updateLayoutItemAxisLabel: (itemId, axis, label) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) => (it.id === itemId ? { ...it, [axis]: label ?? undefined } : it)),
     })),
 
   updateLayoutItemLogScale: (itemId, axis, value) =>

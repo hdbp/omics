@@ -17,6 +17,9 @@ export interface Panel {
   plotType: 'scatter' | 'histogram';
   xLogScale: boolean;
   yLogScale: boolean;
+  /** Display text override for the X/Y axis (e.g. "GFP" instead of the raw "FL1-A" laser name). Unset means show the parameter's own name/stain. */
+  xAxisLabel?: string;
+  yAxisLabel?: string;
   /** Position within the sample's workspace canvas, in px. */
   x: number;
   y: number;
@@ -43,6 +46,8 @@ export interface LayoutItem {
   plotType: 'scatter' | 'histogram';
   xLogScale: boolean;
   yLogScale: boolean;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
   x: number;
   y: number;
   width: number;

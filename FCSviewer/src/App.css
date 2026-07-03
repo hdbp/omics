@@ -286,6 +286,23 @@
   border-color: #2ee6a6;
   box-shadow: 0 0 0 2px rgba(46, 230, 166, 0.45);
 }
+.gate-panel-selected {
+  border-color: #4f8dff;
+  box-shadow: 0 0 0 2px rgba(79, 141, 255, 0.5);
+}
+.layout-guide-line {
+  stroke: #ff5da2;
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.layout-align-group {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding-left: 8px;
+  margin-left: 4px;
+  border-left: 1px solid #2e303a;
+}
 .gate-panel-header {
   display: flex;
   align-items: center;
@@ -441,6 +458,11 @@
 }
 .plot-toolbar select {
   max-width: 110px;
+  font-size: 11px;
+  padding: 2px 4px;
+}
+.axis-label-input {
+  width: 64px;
   font-size: 11px;
   padding: 2px 4px;
 }

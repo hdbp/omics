@@ -15,6 +15,9 @@ A lightweight, standalone, in-browser viewer for flow cytometry `.fcs` files tha
 - **Apply a gating strategy to other samples** — clone the active sample's entire gate hierarchy *and panel layout* onto other loaded samples in one step: the same chain of linked panels (axes, plot type, log scale, position) is recreated on each target, recomputed against its own data. Gates/panels that depend on a parameter missing from a target sample are skipped (with a summary of what was skipped), rather than applied broken.
 - **Statistics table** — count, % of parent, % of total, and median (for two parameters you choose) for every gate across the whole sample, live-updating as you gate. Export the table, or any single population's raw events, as CSV.
 - **A dedicated Layout collage for publication figures** — a separate "Layout" section in the sidebar, independent of any one sample's analysis workspace. Click **⊞** in any panel's header (in any sample) to add a curated copy of it — its own axes, plot type, and a free-text caption — to the Layout. Mix panels from different samples, drag/resize/relabel them, click **Auto-arrange** for a clean grid, and **Export layout as PNG** to save the whole collage as one publish-quality image.
+- **Custom axis labels** — type into the small text box next to a panel's X/Y parameter dropdown (in either a sample's workspace or the Layout) to override what's printed on the plot axis, e.g. swap a laser/detector name like `FL1-A` for `GFP`. Leave it blank to fall back to the parameter name. Carries over automatically when a panel is added to the Layout.
+- **Layout alignment helpers** — click a panel's header in the Layout to select it, shift-click to add more to the selection; a toolbar appears to align the selection's edges or centers (**Left/Right/Top/Bottom/Ctr X/Ctr Y**) or **Dist X/Dist Y** to space 3+ selected panels evenly. Dragging any panel also snaps to nearby panels' edges/centers (within a few pixels) and shows a dashed guide line while it's snapped. Click empty canvas space to clear the selection.
+- **Layout population statistics export** — **Export stats CSV** in the Layout toolbar writes one row per panel in the collage: sample, population path, event count, % of parent, % of total, and median of each axis parameter (using its custom label if set) — everything you need to caption a figure with real numbers.
 
 Not included in this version: compensation/spillover matrices and full biexponential/logicle transforms — the log option is a straight log10 (floored at 1), not FlowJo's logicle.
 
@@ -49,7 +52,9 @@ npm run preview # serve the production build locally
 9. You can also open/focus a gate's panel from the **Gating hierarchy** tree in the sidebar (creating one if it doesn't have a panel open yet).
 10. Once you've built a gating hierarchy on one sample, click **Apply to other samples…** in the Gating hierarchy panel to copy the whole strategy — gates *and* the panel layout that views them — onto other loaded samples (this replaces their existing gates and panels).
 11. In the **Statistics** panel at the bottom, pick which two parameters to show medians for, then **Export stats CSV** for the whole table (every gate, including each quadrant) or the ⭳ button on any row to export that population's raw events as CSV.
-12. Building a figure? Click **⊞** in any panel's header (in any sample) to add it to the **Layout** section in the sidebar. Click **View Layout →** to switch the main view there, mix in panels from other samples the same way, drag/resize/relabel each one (double-click its title — this only changes the figure caption, not the gate's real name), then **Export layout as PNG** for a publish-ready image.
+12. Building a figure? Click **⊞** in any panel's header (in any sample) to add it to the **Layout** section in the sidebar. Click **View Layout →** to switch the main view there, mix in panels from other samples the same way, drag/resize/relabel each one (double-click its title — this only changes the figure caption, not the gate's real name).
+13. In a panel's X/Y toolbar (sample workspace or Layout), type into the small text box next to a parameter dropdown to give that axis a custom label (e.g. `GFP` instead of `FL1-A`); clear it to go back to the parameter name.
+14. In the Layout, click a panel's header to select it and shift-click others to multi-select; use the **Left/Right/Top/Bottom/Ctr X/Ctr Y** buttons that appear to align the selection, or **Dist X/Dist Y** (3+ panels) to space them evenly. Dragging a panel also snaps to its neighbors' edges/centers automatically. Click **Auto-arrange** for a clean grid, **Export stats CSV** for a per-panel table of counts/%/medians, or **Export layout as PNG** for a publish-ready image.
 
 ## Project layout
 
@@ -72,10 +77,10 @@ src/
 │   ├── SampleList.tsx      Loaded-sample switcher
 │   ├── GateTree.tsx        Gating hierarchy sidebar + "apply to other samples" trigger
 │   ├── PanelWorkspace.tsx  The scrollable multi-panel canvas: layout, connector lines, drag/resize, PNG export
-│   ├── GatePanel.tsx       A single plot panel: axes, log toggle, gate drawing/editing/coloring, inline rename, drill-down-to-new-panel
+│   ├── GatePanel.tsx       A single plot panel: axes, custom axis labels, log toggle, gate drawing/editing/coloring, inline rename, drill-down-to-new-panel
 │   ├── LayoutSidebar.tsx   Sidebar section listing Layout items + the samples/layout view switcher
-│   ├── LayoutWorkspace.tsx The Layout collage canvas: grid arrangement, drag/resize, PNG export
-│   ├── LayoutPanel.tsx     A read-only-for-gating plot in the Layout (editable axes/log/label/position/size)
+│   ├── LayoutWorkspace.tsx The Layout collage canvas: grid arrangement, drag/resize, multi-select + align/distribute + snap guides, stats CSV + PNG export
+│   ├── LayoutPanel.tsx     A read-only-for-gating plot in the Layout (editable axes/custom axis labels/log/label/position/size)
 │   ├── StatsTable.tsx      Whole-sample statistics table + CSV export
 │   ├── GateNameDialog.tsx  Small modal for naming a new gate
 │   └── ApplyGatesDialog.tsx Modal for picking which samples to copy a gating strategy onto

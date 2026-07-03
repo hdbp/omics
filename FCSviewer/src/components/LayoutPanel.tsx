@@ -19,6 +19,7 @@ interface Props {
   item: LayoutItem;
   sample: Sample | undefined;
   isFocused: boolean;
+  isSelected: boolean;
   onDragHandleDown: (e: React.MouseEvent) => void;
   onResizeHandleDown: (e: React.MouseEvent) => void;
   onRegisterCanvas: (itemId: string, el: HTMLCanvasElement | null) => void;
@@ -31,9 +32,24 @@ interface Props {
  * figure. Axes/plot type/log scale/label are editable; no new gates can be
  * drawn here — that happens in the sample's own workspace.
  */
-export function LayoutPanel({ item, sample, isFocused, onDragHandleDown, onResizeHandleDown, onRegisterCanvas, onRegisterRoot }: Props) {
-  const { updateLayoutItemAxis, updateLayoutItemPlotType, updateLayoutItemLogScale, relabelLayoutItem, removeLayoutItem } =
-    useStore();
+export function LayoutPanel({
+  item,
+  sample,
+  isFocused,
+  isSelected,
+  onDragHandleDown,
+  onResizeHandleDown,
+  onRegisterCanvas,
+  onRegisterRoot,
+}: Props) {
+  const {
+    updateLayoutItemAxis,
+    updateLayoutItemPlotType,
+    updateLayoutItemLogScale,
+    updateLayoutItemAxisLabel,
+    relabelLayoutItem,
+    removeLayoutItem,
+  } = useStore();
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -202,11 +218,15 @@ export function LayoutPanel({ item, sample, isFocused, onDragHandleDown, onResiz
     ctx.textAlign = 'center';
     ctx.fillStyle = '#c7cdd6';
     ctx.font = '11px system-ui, sans-serif';
-    ctx.fillText(item.xParam + (xLog ? ' (log)' : ''), MARGIN.left + plotWidth / 2, size.height - 6);
+    ctx.fillText((item.xAxisLabel || item.xParam) + (xLog ? ' (log)' : ''), MARGIN.left + plotWidth / 2, size.height - 6);
     ctx.save();
     ctx.translate(12, MARGIN.top + plotHeight / 2);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillText(item.plotType === 'histogram' ? 'Count' : item.yParam + (yLog ? ' (log)' : ''), 0, 0);
+    ctx.fillText(
+      item.plotType === 'histogram' ? 'Count' : (item.yAxisLabel || item.yParam) + (yLog ? ' (log)' : ''),
+      0,
+      0
+    );
     ctx.restore();
 
     ctx.save();
@@ -378,7 +398,11 @@ export function LayoutPanel({ item, sample, isFocused, onDragHandleDown, onResiz
 
   if (!sample) {
     return (
-      <div ref={rootRef} className="gate-panel" style={{ left: item.x, top: item.y, width: item.width, height: item.height }}>
+      <div
+        ref={rootRef}
+        className={`gate-panel ${isSelected ? 'gate-panel-selected' : ''}`}
+        style={{ left: item.x, top: item.y, width: item.width, height: item.height }}
+      >
         <div className="gate-panel-header" onMouseDown={onDragHandleDown}>
           <span className="gate-panel-title">{item.label}</span>
           <button className="gate-panel-close" onMouseDown={(e) => e.stopPropagation()} onClick={() => removeLayoutItem(item.id)}>
@@ -396,7 +420,7 @@ export function LayoutPanel({ item, sample, isFocused, onDragHandleDown, onResiz
   return (
     <div
       ref={rootRef}
-      className={`gate-panel ${isFocused ? 'gate-panel-focused' : ''}`}
+      className={`gate-panel ${isFocused ? 'gate-panel-focused' : ''} ${isSelected ? 'gate-panel-selected' : ''}`}
       style={{ left: item.x, top: item.y, width: item.width, height: item.height }}
     >
       <div className="gate-panel-header" onMouseDown={onDragHandleDown}>
@@ -450,6 +474,14 @@ export function LayoutPanel({ item, sample, isFocused, onDragHandleDown, onResiz
             ))}
           </select>
         </label>
+        <input
+          className="axis-label-input"
+          type="text"
+          placeholder={item.xParam}
+          value={item.xAxisLabel ?? ''}
+          title="Custom X axis label (e.g. type GFP to replace the laser name)"
+          onChange={(e) => updateLayoutItemAxisLabel(item.id, 'xAxisLabel', e.target.value || null)}
+        />
         <button
           className={`btn btn-small ${xLog ? 'btn-active' : ''}`}
           title="Toggle logarithmic X axis"
@@ -469,6 +501,14 @@ export function LayoutPanel({ item, sample, isFocused, onDragHandleDown, onResiz
                 ))}
               </select>
             </label>
+            <input
+              className="axis-label-input"
+              type="text"
+              placeholder={item.yParam}
+              value={item.yAxisLabel ?? ''}
+              title="Custom Y axis label (e.g. type BFP to replace the laser name)"
+              onChange={(e) => updateLayoutItemAxisLabel(item.id, 'yAxisLabel', e.target.value || null)}
+            />
             <button
               className={`btn btn-small ${yLog ? 'btn-active' : ''}`}
               title="Toggle logarithmic Y axis"
