@@ -13,6 +13,8 @@
     "desktop:build": "tauri build"
   },
   "dependencies": {
+    "jspdf": "^4.2.1",
+    "pptxgenjs": "^4.0.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "zustand": "^5.0.14"

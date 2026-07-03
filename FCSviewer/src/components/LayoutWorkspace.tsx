@@ -5,6 +5,7 @@ import { computeLayoutItemStats, formatStatsField } from '../gating/gateStats';
 import { LayoutPanel } from './LayoutPanel';
 import { PADDING, MIN_PANEL_WIDTH, MIN_PANEL_HEIGHT } from '../state/panelLayout';
 import { downloadCanvasAsPng, truncateText } from '../utils/exportImage';
+import { downloadCanvasAsPdf, downloadCanvasAsPptx } from '../utils/exportDoc';
 import { downloadCsv } from '../utils/csv';
 import { drawPlotPanel } from '../utils/plotRender';
 import { getExportTheme, type ExportThemeName } from '../utils/theme';
@@ -99,6 +100,7 @@ export function LayoutWorkspace() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [guides, setGuides] = useState<Guides>({});
   const [exportTheme, setExportTheme] = useState<ExportThemeName>('light');
+  const [exportBusy, setExportBusy] = useState<'pdf' | 'pptx' | null>(null);
   const movedRef = useRef(false);
 
   useEffect(() => {
@@ -231,15 +233,15 @@ export function LayoutWorkspace() {
     }
   }
 
-  function exportLayout() {
-    if (layoutItems.length === 0) return;
+  function buildLayoutCanvas(): HTMLCanvasElement | null {
+    if (layoutItems.length === 0) return null;
     const theme = getExportTheme(exportTheme);
     const scale = 2;
     const out = document.createElement('canvas');
     out.width = contentSize.width * scale;
     out.height = contentSize.height * scale;
     const ctx = out.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) return null;
     ctx.scale(scale, scale);
     ctx.fillStyle = theme.pageBg;
     ctx.fillRect(0, 0, contentSize.width, contentSize.height);
@@ -298,7 +300,31 @@ export function LayoutWorkspace() {
       }
     }
 
+    return out;
+  }
+
+  function exportLayoutAsPng() {
+    const out = buildLayoutCanvas();
+    if (!out) return;
     downloadCanvasAsPng(out, 'fcs_layout_figure.png');
+  }
+
+  function exportLayoutAsPdf() {
+    const out = buildLayoutCanvas();
+    if (!out) return;
+    setExportBusy('pdf');
+    downloadCanvasAsPdf(out, contentSize.width, contentSize.height, 'fcs_layout_figure.pdf')
+      .catch((e) => console.error('PDF export failed', e))
+      .finally(() => setExportBusy(null));
+  }
+
+  function exportLayoutAsPptx() {
+    const out = buildLayoutCanvas();
+    if (!out) return;
+    setExportBusy('pptx');
+    downloadCanvasAsPptx(out, contentSize.width, contentSize.height, 'fcs_layout_figure.pptx')
+      .catch((e) => console.error('PPTX export failed', e))
+      .finally(() => setExportBusy(null));
   }
 
   function exportStats() {
@@ -351,8 +377,22 @@ export function LayoutWorkspace() {
           </button>
         </div>
         <div className="btn-group">
-          <button className="btn btn-primary" onClick={exportLayout} disabled={layoutItems.length === 0}>
-            Export layout as PNG
+          <button className="btn btn-primary" onClick={exportLayoutAsPng} disabled={layoutItems.length === 0}>
+            Export as PNG
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={exportLayoutAsPdf}
+            disabled={layoutItems.length === 0 || exportBusy !== null}
+          >
+            {exportBusy === 'pdf' ? 'Exporting…' : 'Export as PDF'}
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={exportLayoutAsPptx}
+            disabled={layoutItems.length === 0 || exportBusy !== null}
+          >
+            {exportBusy === 'pptx' ? 'Exporting…' : 'Export as PowerPoint'}
           </button>
         </div>
         {selectedIds.size >= 2 && (
