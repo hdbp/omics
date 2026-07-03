@@ -1,6 +1,26 @@
 import type { FCSParameter } from '../fcs/types';
 import type { GateNode } from '../gating/gateTypes';
 
+/** Fractional (0-1) position of a draggable on-canvas annotation, relative to the plot area (not the whole panel). */
+export interface AnnotationPos {
+  xFrac: number;
+  yFrac: number;
+}
+
+/** Which population-statistics fields a Layout panel's stats block should display. */
+export type StatsFieldKey = 'population' | 'count' | 'percentParent' | 'percentTotal' | 'medianX' | 'medianY';
+
+export const DEFAULT_STATS_FIELDS: StatsFieldKey[] = ['count', 'percentParent', 'percentTotal'];
+
+export const STATS_FIELD_LABELS: Record<StatsFieldKey, string> = {
+  population: 'Population path',
+  count: 'Count',
+  percentParent: '% of parent',
+  percentTotal: '% of total',
+  medianX: 'Median X',
+  medianY: 'Median Y',
+};
+
 /**
  * A single plot in a sample's workspace. Each panel is permanently bound to
  * one population (gateId) with its own axes/scale/plot type — mirroring
@@ -20,6 +40,8 @@ export interface Panel {
   /** Display text override for the X/Y axis (e.g. "GFP" instead of the raw "FL1-A" laser name). Unset means show the parameter's own name/stain. */
   xAxisLabel?: string;
   yAxisLabel?: string;
+  /** Draggable position of the %parent/%total stats annotation drawn on the plot. Unset = default top-left placement. */
+  statsAnnotation?: AnnotationPos;
   /** Position within the sample's workspace canvas, in px. */
   x: number;
   y: number;
@@ -48,6 +70,10 @@ export interface LayoutItem {
   yLogScale: boolean;
   xAxisLabel?: string;
   yAxisLabel?: string;
+  /** Draggable position of the %parent/%total stats annotation drawn on the plot. Unset = default top-left placement. */
+  statsAnnotation?: AnnotationPos;
+  /** Which stats fields to print in the text block under this panel's plot. Unset = DEFAULT_STATS_FIELDS. */
+  statsFields?: StatsFieldKey[];
   x: number;
   y: number;
   width: number;

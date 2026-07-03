@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { getColumn, type Sample, type Panel } from '../state/types';
 import { ancestorChain, getGateEventIndices, shapeContainsPoint } from '../gating/gateEval';
+import { gatePercentages } from '../gating/gateStats';
 import { ROOT_GATE_ID } from '../gating/gateTypes';
 import type { GateShape, Point, QuadrantId } from '../gating/gateTypes';
 import {
@@ -25,6 +26,13 @@ const QUADRANT_LABEL_OFFSET = 6;
 const DEFAULT_GATE_COLOR = '#2ee6a6';
 const DEFAULT_HISTOGRAM_COLOR = '#4f8dff';
 const SHAPE_MOVE_THRESHOLD_PX = 3;
+const DEFAULT_STATS_ANNOTATION = { xFrac: 0.03, yFrac: 0.06 };
+const ANNOTATION_PADDING = 6;
+const ANNOTATION_LINE_HEIGHT = 13;
+
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
 
 function paramRange(sample: Sample, name: string): number {
   return sample.parameters.find((p) => p.name === name)?.range ?? 1;
@@ -135,6 +143,7 @@ export function GatePanel({
     setGateColor,
     updateGateShape,
     addToLayout,
+    updatePanelStatsAnnotationPos,
   } = useStore();
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -150,6 +159,8 @@ export function GatePanel({
   const [quadrantDraft, setQuadrantDraft] = useState<Point | null>(null);
   const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
   const [shapeDrag, setShapeDrag] = useState<ShapeDragState | null>(null);
+  const [annotDrag, setAnnotDrag] = useState<{ startPx: Point; startFrac: { xFrac: number; yFrac: number } } | null>(null);
+  const annotBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const suppressNextClick = useRef(false);
   const [pendingShape, setPendingShape] = useState<GateShape | null>(null);
   const [drawing, setDrawing] = useState(false);
@@ -237,6 +248,10 @@ export function GatePanel({
   }, [sample.gates, gateNode, panel.xParam, panel.yParam]);
 
   const indices = useMemo(() => getGateEventIndices(sample, panel.gateId), [sample, panel.gateId]);
+  const { percentParent, percentTotal } = useMemo(
+    () => gatePercentages(sample, gateNode, indices),
+    [sample, gateNode, indices]
+  );
 
   const plotWidth = size.width - MARGIN.left - MARGIN.right;
   const plotHeight = size.height - MARGIN.top - MARGIN.bottom;
@@ -477,7 +492,43 @@ export function GatePanel({
     }
 
     ctx.restore();
+
+    drawStatsAnnotation(ctx);
   });
+
+  function drawStatsAnnotation(ctx: CanvasRenderingContext2D) {
+    const frac = panel.statsAnnotation ?? DEFAULT_STATS_ANNOTATION;
+    const lines: string[] = [];
+    if (panel.gateId !== ROOT_GATE_ID) lines.push(`${percentParent.toFixed(1)}% of parent`);
+    lines.push(`${percentTotal.toFixed(1)}% of total`);
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    const textWidth = Math.max(...lines.map((l) => ctx.measureText(l).width));
+    const boxWidth = textWidth + ANNOTATION_PADDING * 2;
+    const boxHeight = lines.length * ANNOTATION_LINE_HEIGHT + ANNOTATION_PADDING * 2 - 3;
+    const maxX = Math.max(MARGIN.left, MARGIN.left + plotWidth - boxWidth);
+    const maxY = Math.max(MARGIN.top, MARGIN.top + plotHeight - boxHeight);
+    const x = Math.min(Math.max(MARGIN.left + frac.xFrac * plotWidth, MARGIN.left), maxX);
+    const y = Math.min(Math.max(MARGIN.top + frac.yFrac * plotHeight, MARGIN.top), maxY);
+    annotBoxRef.current = { x, y, width: boxWidth, height: boxHeight };
+
+    ctx.fillStyle = 'rgba(10, 11, 15, 0.72)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(x, y, boxWidth, boxHeight, 4);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(x, y, boxWidth, boxHeight);
+      ctx.strokeRect(x, y, boxWidth, boxHeight);
+    }
+    ctx.fillStyle = '#e5e7eb';
+    lines.forEach((line, i) => {
+      ctx.fillText(line, x + ANNOTATION_PADDING, y + ANNOTATION_PADDING + 9 + i * ANNOTATION_LINE_HEIGHT);
+    });
+  }
 
   function drawShapeOverlay(
     ctx: CanvasRenderingContext2D,
@@ -680,8 +731,19 @@ export function GatePanel({
     return null;
   }
 
+  function isInAnnotationBox(px: Point): boolean {
+    const box = annotBoxRef.current;
+    if (!box) return false;
+    return px.x >= box.x && px.x <= box.x + box.width && px.y >= box.y && px.y <= box.y + box.height;
+  }
+
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (mode === 'none') {
+      const px0 = getMousePx(e);
+      if (isInAnnotationBox(px0)) {
+        setAnnotDrag({ startPx: px0, startFrac: panel.statsAnnotation ?? DEFAULT_STATS_ANNOTATION });
+        return;
+      }
       const groupId = findNearbyQuadrantGroup(e);
       if (groupId) {
         setDraggingGroupId(groupId);
@@ -727,6 +789,15 @@ export function GatePanel({
   }
 
   function handleMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (annotDrag) {
+      const px = getMousePx(e);
+      if (plotWidth > 0 && plotHeight > 0) {
+        const xFrac = clamp01(annotDrag.startFrac.xFrac + (px.x - annotDrag.startPx.x) / plotWidth);
+        const yFrac = clamp01(annotDrag.startFrac.yFrac + (px.y - annotDrag.startPx.y) / plotHeight);
+        updatePanelStatsAnnotationPos(sample.id, panel.id, xFrac, yFrac);
+      }
+      return;
+    }
     if (draggingGroupId) {
       const data = getMouseData(e);
       updateQuadrantPosition(sample.id, draggingGroupId, data.x, data.y);
@@ -760,6 +831,11 @@ export function GatePanel({
   }
 
   function handleMouseUp() {
+    if (annotDrag) {
+      setAnnotDrag(null);
+      suppressNextClick.current = true;
+      return;
+    }
     if (draggingGroupId) {
       setDraggingGroupId(null);
       suppressNextClick.current = true;
@@ -1062,7 +1138,7 @@ export function GatePanel({
           onClick={handleClick}
           style={{
             cursor:
-              draggingGroupId || shapeDrag
+              draggingGroupId || shapeDrag || annotDrag
                 ? 'grabbing'
                 : mode !== 'none'
                   ? 'crosshair'

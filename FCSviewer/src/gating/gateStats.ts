@@ -1,7 +1,8 @@
-import type { Sample } from '../state/types';
+import type { Sample, StatsFieldKey } from '../state/types';
 import { getColumn } from '../state/types';
-import { getGateEventIndices } from './gateEval';
+import { getGateEventIndices, ancestorChain } from './gateEval';
 import { ROOT_GATE_ID } from './gateTypes';
+import type { GateNode } from './gateTypes';
 
 export interface GateStat {
   gateId: string;
@@ -60,4 +61,67 @@ export function computeGateStats(sample: Sample): GateStat[] {
 
 export function medianForParam(sample: Sample, indices: Uint32Array, paramName: string): number {
   return median(getColumn(sample, paramName), indices);
+}
+
+/** %-of-parent and %-of-total for a single gate's already-computed event indices (root gates report 100% of parent). */
+export function gatePercentages(
+  sample: Sample,
+  gateNode: GateNode | undefined,
+  indices: Uint32Array
+): { percentParent: number; percentTotal: number } {
+  const percentTotal = sample.eventCount > 0 ? (indices.length / sample.eventCount) * 100 : 0;
+  if (!gateNode?.parentId) return { percentParent: 100, percentTotal };
+  const parentIndices = getGateEventIndices(sample, gateNode.parentId);
+  const percentParent = parentIndices.length > 0 ? (indices.length / parentIndices.length) * 100 : 0;
+  return { percentParent, percentTotal };
+}
+
+export interface LayoutItemStats {
+  populationPath: string;
+  count: number;
+  percentParent: number;
+  percentTotal: number;
+  medianX: number;
+  medianY: number;
+}
+
+/** All the raw numbers a Layout panel's stats block (or its PNG-export equivalent) might print, for one population/axis pair. */
+export function computeLayoutItemStats(
+  sample: Sample,
+  gateId: string,
+  xParam: string,
+  yParam: string,
+  plotType: 'scatter' | 'histogram'
+): LayoutItemStats {
+  const gateNode = sample.gates[gateId];
+  const indices = getGateEventIndices(sample, gateId);
+  const { percentParent, percentTotal } = gatePercentages(sample, gateNode, indices);
+  return {
+    populationPath: ancestorChain(sample.gates, gateId)
+      .map((n) => n.name)
+      .join(' › '),
+    count: indices.length,
+    percentParent,
+    percentTotal,
+    medianX: medianForParam(sample, indices, xParam),
+    medianY: plotType === 'scatter' ? medianForParam(sample, indices, yParam) : NaN,
+  };
+}
+
+/** Renders one stats field as display text, matching the live Layout panel and the exported PNG/CSV. */
+export function formatStatsField(key: StatsFieldKey, stats: LayoutItemStats, plotType: 'scatter' | 'histogram'): string {
+  switch (key) {
+    case 'population':
+      return stats.populationPath;
+    case 'count':
+      return stats.count.toLocaleString();
+    case 'percentParent':
+      return `${stats.percentParent.toFixed(1)}%`;
+    case 'percentTotal':
+      return `${stats.percentTotal.toFixed(1)}%`;
+    case 'medianX':
+      return Number.isFinite(stats.medianX) ? stats.medianX.toFixed(1) : '—';
+    case 'medianY':
+      return plotType === 'scatter' && Number.isFinite(stats.medianY) ? stats.medianY.toFixed(1) : '—';
+  }
 }

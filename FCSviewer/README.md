@@ -8,6 +8,7 @@ A lightweight, standalone, in-browser viewer for flow cytometry `.fcs` files tha
 - **A workspace of linked plots, not one plot that swaps in place** — like FlowJo, each sample gets a canvas of "panels." Every panel is a dot plot or histogram bound permanently to one population, with its own X/Y axes, log/linear scale, and plot type.
 - **Gate, then drill down into a brand-new panel** — draw a rectangle/polygon gate on a panel (e.g. FSC-A vs SSC-A), then click the gated region to open it in a *new* panel, connected to its parent by a line. Pick different axes there (e.g. GFP vs BFP) and gate again — each drill-down spawns another linked panel, building out the full gating tree visually.
 - **Gates stay editable after you've drilled into them** — every rectangle/polygon/range gate shows small drag handles on the panel you drew it on. Drag a handle to reshape it, or drag its body to move it; any panel already drilled into that population (or a descendant of it) recomputes its events and stats live, no need to redraw or re-drill.
+- **A movable %parent/%total stats annotation on every panel** — each panel (in a sample's workspace or the Layout) shows a small badge with the population's % of parent and % of total, live-updating as you gate, quadrant, or drill down. Drag the badge anywhere on the plot so it doesn't sit on top of the data (or get hidden behind it).
 - **Resize, rearrange, and export the layout** — drag any panel by its header to reposition it, drag its bottom-right corner to resize it, click **Auto-arrange** to snap everything back to a clean tree layout (respecting each panel's current size), and **Export layout as PNG** to save the whole assembled panel-and-connector diagram as one image.
 - **Label panels and color populations** — double-click a panel's title to rename its population (shared with the gate tree). Click the small color swatch in a panel's header or next to a gate in the tree to assign it a color: child-gate outlines/quadrant labels are drawn in their assigned color, and a panel showing a colored population renders its own events in that flat color instead of the default density heatmap.
 - **Quadrant gates** — click-drag to place a crosshair on a dot plot, splitting it into 4 populations (auto-named by +/- for each axis) with a single gesture. Drag the crosshair intersection afterward to reposition all 4 at once — every quadrant is a regular gate, so it gets its own row (count, %parent, %total, median) in the statistics table and can itself be drilled into.
@@ -18,6 +19,7 @@ A lightweight, standalone, in-browser viewer for flow cytometry `.fcs` files tha
 - **Custom axis labels** — type into the small text box next to a panel's X/Y parameter dropdown (in either a sample's workspace or the Layout) to override what's printed on the plot axis, e.g. swap a laser/detector name like `FL1-A` for `GFP`. Leave it blank to fall back to the parameter name. Carries over automatically when a panel is added to the Layout.
 - **Layout alignment helpers** — click a panel's header in the Layout to select it, shift-click to add more to the selection; a toolbar appears to align the selection's edges or centers (**Left/Right/Top/Bottom/Ctr X/Ctr Y**) or **Dist X/Dist Y** to space 3+ selected panels evenly. Dragging any panel also snaps to nearby panels' edges/centers (within a few pixels) and shows a dashed guide line while it's snapped. Click empty canvas space to clear the selection.
 - **Layout population statistics export** — **Export stats CSV** in the Layout toolbar writes one row per panel in the collage: sample, population path, event count, % of parent, % of total, and median of each axis parameter (using its custom label if set) — everything you need to caption a figure with real numbers.
+- **Choose which stats print under each Layout panel** — click **Stats ▾** on a Layout panel to pick which fields (population path, count, % parent, % total, median X, median Y) appear as a text line under its plot. Baked into **Export layout as PNG** too, so the exported figure carries the numbers, not just the plot.
 
 Not included in this version: compensation/spillover matrices and full biexponential/logicle transforms — the log option is a straight log10 (floored at 1), not FlowJo's logicle.
 
@@ -55,6 +57,8 @@ npm run preview # serve the production build locally
 12. Building a figure? Click **⊞** in any panel's header (in any sample) to add it to the **Layout** section in the sidebar. Click **View Layout →** to switch the main view there, mix in panels from other samples the same way, drag/resize/relabel each one (double-click its title — this only changes the figure caption, not the gate's real name).
 13. In a panel's X/Y toolbar (sample workspace or Layout), type into the small text box next to a parameter dropdown to give that axis a custom label (e.g. `GFP` instead of `FL1-A`); clear it to go back to the parameter name.
 14. In the Layout, click a panel's header to select it and shift-click others to multi-select; use the **Left/Right/Top/Bottom/Ctr X/Ctr Y** buttons that appear to align the selection, or **Dist X/Dist Y** (3+ panels) to space them evenly. Dragging a panel also snaps to its neighbors' edges/centers automatically. Click **Auto-arrange** for a clean grid, **Export stats CSV** for a per-panel table of counts/%/medians, or **Export layout as PNG** for a publish-ready image.
+15. Every panel shows a small **%parent/%total badge** on its plot — drag it (by clicking directly on the badge) to wherever it won't sit on top of your data; this is separate from dragging the panel itself, which only happens from the header.
+16. On a Layout panel, click **Stats ▾** to check/uncheck which fields (population path, count, %parent, %total, median X, median Y) show as a line of text under the plot — and in the exported PNG.
 
 ## Project layout
 
@@ -66,7 +70,7 @@ src/
 ├── gating/
 │   ├── gateTypes.ts      Gate shape/node types (rectangle, polygon, range, quadrant) + optional color
 │   ├── gateEval.ts       Point-in-gate tests, ancestor-chain evaluation
-│   ├── gateStats.ts      Per-gate count/%/median statistics
+│   ├── gateStats.ts      Per-gate count/%/median statistics; shared formatting for the Layout stats block/CSV/PNG export
 │   └── gateClone.ts      Clones a gate hierarchy (+ id map, colors) onto another sample's parameters
 ├── state/
 │   ├── store.ts          zustand store: samples, gate trees, panels, Layout collage, UI selection

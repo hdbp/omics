@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { getColumn, type Sample, type LayoutItem } from '../state/types';
+import { getColumn, DEFAULT_STATS_FIELDS, STATS_FIELD_LABELS, type Sample, type LayoutItem, type StatsFieldKey } from '../state/types';
 import { ancestorChain, getGateEventIndices } from '../gating/gateEval';
+import { computeLayoutItemStats, formatStatsField } from '../gating/gateStats';
 import type { GateShape, QuadrantId } from '../gating/gateTypes';
 import { makeScale, toRange, niceTicks, logTicks, dataToPlotValue, type LinearScale } from '../utils/scale';
 import { densityColor } from '../utils/colormap';
@@ -10,6 +11,14 @@ const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
 const QUADRANT_LABEL_OFFSET = 6;
 const DEFAULT_GATE_COLOR = '#2ee6a6';
 const DEFAULT_HISTOGRAM_COLOR = '#4f8dff';
+const ANNOTATION_PADDING = 6;
+const ANNOTATION_LINE_HEIGHT = 13;
+const DEFAULT_STATS_ANNOTATION = { xFrac: 0.03, yFrac: 0.06 };
+const ALL_STATS_FIELDS: StatsFieldKey[] = ['population', 'count', 'percentParent', 'percentTotal', 'medianX', 'medianY'];
+
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
 
 function paramRange(sample: Sample, name: string): number {
   return sample.parameters.find((p) => p.name === name)?.range ?? 1;
@@ -47,20 +56,37 @@ export function LayoutPanel({
     updateLayoutItemPlotType,
     updateLayoutItemLogScale,
     updateLayoutItemAxisLabel,
+    updateLayoutItemStatsAnnotationPos,
+    updateLayoutItemStatsFields,
     relabelLayoutItem,
     removeLayoutItem,
   } = useStore();
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const statsPickerRef = useRef<HTMLDivElement>(null);
+  const annotBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelValue, setLabelValue] = useState('');
   const [size, setSize] = useState({ width: 340, height: 230 });
+  const [annotDrag, setAnnotDrag] = useState<{ startPx: { x: number; y: number }; startFrac: { xFrac: number; yFrac: number } } | null>(
+    null
+  );
+  const [statsPickerOpen, setStatsPickerOpen] = useState(false);
 
   const xLog = item.xLogScale;
   const yLog = item.plotType === 'scatter' && item.yLogScale;
   const gateNode = sample?.gates[item.gateId];
   const path = useMemo(() => (sample ? ancestorChain(sample.gates, item.gateId) : []), [sample, item.gateId]);
+
+  useEffect(() => {
+    if (!statsPickerOpen) return;
+    function onDocMouseDown(e: MouseEvent) {
+      if (statsPickerRef.current && !statsPickerRef.current.contains(e.target as Node)) setStatsPickerOpen(false);
+    }
+    window.addEventListener('mousedown', onDocMouseDown);
+    return () => window.removeEventListener('mousedown', onDocMouseDown);
+  }, [statsPickerOpen]);
 
   useEffect(() => {
     if (isFocused) rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
@@ -88,6 +114,18 @@ export function LayoutPanel({
   }, [item.id]);
 
   const indices = useMemo(() => (sample ? getGateEventIndices(sample, item.gateId) : new Uint32Array(0)), [sample, item.gateId]);
+  const itemStats = useMemo(
+    () => (sample ? computeLayoutItemStats(sample, item.gateId, item.xParam, item.yParam, item.plotType) : null),
+    [sample, item.gateId, item.xParam, item.yParam, item.plotType]
+  );
+  const percentParent = itemStats?.percentParent ?? 0;
+  const percentTotal = itemStats?.percentTotal ?? 0;
+  const statsFields = item.statsFields ?? DEFAULT_STATS_FIELDS;
+
+  function toggleStatsField(key: StatsFieldKey) {
+    const next = statsFields.includes(key) ? statsFields.filter((k) => k !== key) : [...statsFields, key];
+    updateLayoutItemStatsFields(item.id, next);
+  }
 
   const plotWidth = size.width - MARGIN.left - MARGIN.right;
   const plotHeight = size.height - MARGIN.top - MARGIN.bottom;
@@ -284,7 +322,73 @@ export function LayoutPanel({
     }
 
     ctx.restore();
+
+    drawStatsAnnotation(ctx);
   });
+
+  function drawStatsAnnotation(ctx: CanvasRenderingContext2D) {
+    const frac = item.statsAnnotation ?? DEFAULT_STATS_ANNOTATION;
+    const lines: string[] = [];
+    if (gateNode?.parentId) lines.push(`${percentParent.toFixed(1)}% of parent`);
+    lines.push(`${percentTotal.toFixed(1)}% of total`);
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    const textWidth = Math.max(...lines.map((l) => ctx.measureText(l).width));
+    const boxWidth = textWidth + ANNOTATION_PADDING * 2;
+    const boxHeight = lines.length * ANNOTATION_LINE_HEIGHT + ANNOTATION_PADDING * 2 - 3;
+    const maxX = Math.max(MARGIN.left, MARGIN.left + plotWidth - boxWidth);
+    const maxY = Math.max(MARGIN.top, MARGIN.top + plotHeight - boxHeight);
+    const x = Math.min(Math.max(MARGIN.left + frac.xFrac * plotWidth, MARGIN.left), maxX);
+    const y = Math.min(Math.max(MARGIN.top + frac.yFrac * plotHeight, MARGIN.top), maxY);
+    annotBoxRef.current = { x, y, width: boxWidth, height: boxHeight };
+
+    ctx.fillStyle = 'rgba(10, 11, 15, 0.72)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(x, y, boxWidth, boxHeight, 4);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(x, y, boxWidth, boxHeight);
+      ctx.strokeRect(x, y, boxWidth, boxHeight);
+    }
+    ctx.fillStyle = '#e5e7eb';
+    lines.forEach((line, i) => {
+      ctx.fillText(line, x + ANNOTATION_PADDING, y + ANNOTATION_PADDING + 9 + i * ANNOTATION_LINE_HEIGHT);
+    });
+  }
+
+  function isInAnnotationBox(px: { x: number; y: number }): boolean {
+    const box = annotBoxRef.current;
+    if (!box) return false;
+    return px.x >= box.x && px.x <= box.x + box.width && px.y >= box.y && px.y <= box.y + box.height;
+  }
+
+  function getMousePx(e: React.MouseEvent<HTMLCanvasElement>): { x: number; y: number } {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  function handleCanvasMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    const px = getMousePx(e);
+    if (isInAnnotationBox(px)) {
+      setAnnotDrag({ startPx: px, startFrac: item.statsAnnotation ?? DEFAULT_STATS_ANNOTATION });
+    }
+  }
+
+  function handleCanvasMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!annotDrag || plotWidth <= 0 || plotHeight <= 0) return;
+    const px = getMousePx(e);
+    const xFrac = clamp01(annotDrag.startFrac.xFrac + (px.x - annotDrag.startPx.x) / plotWidth);
+    const yFrac = clamp01(annotDrag.startFrac.yFrac + (px.y - annotDrag.startPx.y) / plotHeight);
+    updateLayoutItemStatsAnnotationPos(item.id, xFrac, yFrac);
+  }
+
+  function handleCanvasMouseUp() {
+    setAnnotDrag(null);
+  }
 
   function drawShapeOverlay(
     ctx: CanvasRenderingContext2D,
@@ -421,7 +525,14 @@ export function LayoutPanel({
     <div
       ref={rootRef}
       className={`gate-panel ${isFocused ? 'gate-panel-focused' : ''} ${isSelected ? 'gate-panel-selected' : ''}`}
-      style={{ left: item.x, top: item.y, width: item.width, height: item.height }}
+      style={{
+        left: item.x,
+        top: item.y,
+        width: item.width,
+        height: item.height,
+        overflow: statsPickerOpen ? 'visible' : undefined,
+        zIndex: statsPickerOpen ? 50 : undefined,
+      }}
     >
       <div className="gate-panel-header" onMouseDown={onDragHandleDown}>
         {editingLabel ? (
@@ -534,11 +645,48 @@ export function LayoutPanel({
             Histogram
           </button>
         </div>
+        <div className="stats-picker-wrap" ref={statsPickerRef}>
+          <button
+            className={`btn btn-small ${statsPickerOpen ? 'btn-active' : ''}`}
+            title="Choose which population-statistics fields to show under this plot"
+            onClick={() => setStatsPickerOpen((o) => !o)}
+          >
+            Stats ▾
+          </button>
+          {statsPickerOpen && (
+            <div className="stats-picker-popover">
+              {ALL_STATS_FIELDS.map((key) => (
+                <label key={key} className="stats-picker-option">
+                  <input type="checkbox" checked={statsFields.includes(key)} onChange={() => toggleStatsField(key)} />
+                  {STATS_FIELD_LABELS[key]}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
         <span className="event-count">{indices.length.toLocaleString()}</span>
       </div>
       <div className="plot-canvas-container" ref={containerRef}>
-        <canvas ref={canvasRef} style={{ cursor: 'default' }} />
+        <canvas
+          ref={canvasRef}
+          onMouseDown={handleCanvasMouseDown}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={handleCanvasMouseUp}
+          onMouseLeave={handleCanvasMouseUp}
+          style={{ cursor: annotDrag ? 'grabbing' : 'default' }}
+        />
       </div>
+      {sample && statsFields.length > 0 && (
+        <div className="layout-stats-block">
+          {statsFields.map((key, i) => (
+            <span key={key} className="layout-stats-item">
+              {i > 0 && <span className="layout-stats-sep">·</span>}
+              <span className="layout-stats-label">{STATS_FIELD_LABELS[key]}:</span>{' '}
+              {itemStats ? formatStatsField(key, itemStats, item.plotType) : '—'}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="gate-panel-resize-handle" title="Drag to resize" onMouseDown={onResizeHandleDown} />
     </div>
   );

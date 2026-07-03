@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { ancestorChain, getGateEventIndices } from '../gating/gateEval';
-import { medianForParam } from '../gating/gateStats';
+import { ancestorChain } from '../gating/gateEval';
+import { computeLayoutItemStats, formatStatsField } from '../gating/gateStats';
 import { LayoutPanel } from './LayoutPanel';
 import { PADDING, MIN_PANEL_WIDTH, MIN_PANEL_HEIGHT } from '../state/panelLayout';
 import { downloadCanvasAsPng, truncateText } from '../utils/exportImage';
 import { downloadCsv } from '../utils/csv';
-import type { LayoutItem } from '../state/types';
+import { DEFAULT_STATS_FIELDS, STATS_FIELD_LABELS, type LayoutItem } from '../state/types';
 
 const SNAP_THRESHOLD = 6;
 const MOVE_THRESHOLD = 3;
@@ -278,6 +278,16 @@ export function LayoutWorkspace() {
         const offY = canvasRect.top - rootRect.top;
         ctx.drawImage(canvasEl, item.x + offX, item.y + offY, canvasRect.width, canvasRect.height);
       }
+
+      const statsFields = item.statsFields ?? DEFAULT_STATS_FIELDS;
+      if (sample && statsFields.length > 0) {
+        const stats = computeLayoutItemStats(sample, item.gateId, item.xParam, item.yParam, item.plotType);
+        const text = statsFields.map((k) => `${STATS_FIELD_LABELS[k]}: ${formatStatsField(k, stats, item.plotType)}`).join('   ·   ');
+        ctx.fillStyle = '#9aa4b2';
+        ctx.font = '9px system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(truncateText(text, Math.floor(item.width / 4.2)), item.x + 12, item.y + item.height - 8);
+      }
     }
 
     downloadCanvasAsPng(out, 'fcs_layout_figure.png');
@@ -293,27 +303,18 @@ export function LayoutWorkspace() {
         rows.push([item.label, '(sample removed)', '', '', '', '', item.xParam, '', item.yParam, '']);
         continue;
       }
-      const gateNode = sample.gates[item.gateId];
-      const indices = getGateEventIndices(sample, item.gateId);
-      const parentIndices = gateNode?.parentId ? getGateEventIndices(sample, gateNode.parentId) : null;
-      const percentParent = parentIndices ? (parentIndices.length > 0 ? (indices.length / parentIndices.length) * 100 : 0) : 100;
-      const percentTotal = sample.eventCount > 0 ? (indices.length / sample.eventCount) * 100 : 0;
-      const medianX = medianForParam(sample, indices, item.xParam);
-      const medianY = item.plotType === 'scatter' ? medianForParam(sample, indices, item.yParam) : NaN;
-      const populationPath = ancestorChain(sample.gates, item.gateId)
-        .map((n) => n.name)
-        .join(' › ');
+      const stats = computeLayoutItemStats(sample, item.gateId, item.xParam, item.yParam, item.plotType);
       rows.push([
         item.label,
         sample.fileName,
-        populationPath,
-        indices.length,
-        percentParent.toFixed(2),
-        percentTotal.toFixed(2),
+        stats.populationPath,
+        stats.count,
+        stats.percentParent.toFixed(2),
+        stats.percentTotal.toFixed(2),
         item.xAxisLabel || item.xParam,
-        Number.isFinite(medianX) ? medianX.toFixed(1) : '',
+        Number.isFinite(stats.medianX) ? stats.medianX.toFixed(1) : '',
         item.plotType === 'scatter' ? item.yAxisLabel || item.yParam : '',
-        Number.isFinite(medianY) ? medianY.toFixed(1) : '',
+        Number.isFinite(stats.medianY) ? stats.medianY.toFixed(1) : '',
       ]);
     }
     downloadCsv('fcs_layout_stats.csv', rows);

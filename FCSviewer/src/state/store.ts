@@ -15,7 +15,7 @@ import {
   MIN_PANEL_WIDTH,
   MIN_PANEL_HEIGHT,
 } from './panelLayout';
-import type { Sample, Panel, LayoutItem } from './types';
+import type { Sample, Panel, LayoutItem, StatsFieldKey } from './types';
 import type { FCSParameter } from '../fcs/types';
 
 const QUADRANT_IDS: QuadrantId[] = ['UL', 'UR', 'LL', 'LR'];
@@ -68,6 +68,7 @@ function clonePanels(
       // A custom axis label only makes sense next to the parameter it was written for.
       xAxisLabel: xOk ? src.xAxisLabel : undefined,
       yAxisLabel: yOk ? src.yAxisLabel : undefined,
+      statsAnnotation: src.statsAnnotation,
       x: src.x,
       y: src.y,
       width: src.width,
@@ -124,6 +125,8 @@ interface AppState {
   updatePanelLogScale: (sampleId: string, panelId: string, axis: 'xLogScale' | 'yLogScale', value: boolean) => void;
   /** Display-text override for an axis (e.g. "GFP"); pass null to revert to the parameter's own name. */
   updatePanelAxisLabel: (sampleId: string, panelId: string, axis: 'xAxisLabel' | 'yAxisLabel', label: string | null) => void;
+  /** Repositions the draggable %parent/%total stats annotation drawn on a panel's plot. */
+  updatePanelStatsAnnotationPos: (sampleId: string, panelId: string, xFrac: number, yFrac: number) => void;
   movePanel: (sampleId: string, panelId: string, x: number, y: number) => void;
   resizePanel: (sampleId: string, panelId: string, width: number, height: number) => void;
   removePanel: (sampleId: string, panelId: string) => void;
@@ -152,6 +155,10 @@ interface AppState {
   updateLayoutItemAxis: (itemId: string, axis: 'xParam' | 'yParam', value: string) => void;
   updateLayoutItemPlotType: (itemId: string, plotType: 'scatter' | 'histogram') => void;
   updateLayoutItemAxisLabel: (itemId: string, axis: 'xAxisLabel' | 'yAxisLabel', label: string | null) => void;
+  /** Repositions the draggable %parent/%total stats annotation drawn on a Layout item's plot. */
+  updateLayoutItemStatsAnnotationPos: (itemId: string, xFrac: number, yFrac: number) => void;
+  /** Which fields the stats block under a Layout item's plot should print. */
+  updateLayoutItemStatsFields: (itemId: string, fields: StatsFieldKey[]) => void;
   updateLayoutItemLogScale: (itemId: string, axis: 'xLogScale' | 'yLogScale', value: boolean) => void;
   relabelLayoutItem: (itemId: string, label: string) => void;
   moveLayoutItem: (itemId: string, x: number, y: number) => void;
@@ -265,6 +272,14 @@ export const useStore = create<AppState>((set, get) => ({
       samples: updateSample(state.samples, sampleId, (s) => ({
         ...s,
         panels: s.panels.map((p) => (p.id === panelId ? { ...p, [axis]: label ?? undefined } : p)),
+      })),
+    })),
+
+  updatePanelStatsAnnotationPos: (sampleId, panelId, xFrac, yFrac) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => ({
+        ...s,
+        panels: s.panels.map((p) => (p.id === panelId ? { ...p, statsAnnotation: { xFrac, yFrac } } : p)),
       })),
     })),
 
@@ -520,6 +535,7 @@ export const useStore = create<AppState>((set, get) => ({
         yLogScale: panel.yLogScale,
         xAxisLabel: panel.xAxisLabel,
         yAxisLabel: panel.yAxisLabel,
+        statsAnnotation: panel.statsAnnotation,
         x: pos.x,
         y: pos.y,
         width: panel.width,
@@ -545,6 +561,16 @@ export const useStore = create<AppState>((set, get) => ({
   updateLayoutItemAxisLabel: (itemId, axis, label) =>
     set((state) => ({
       layoutItems: state.layoutItems.map((it) => (it.id === itemId ? { ...it, [axis]: label ?? undefined } : it)),
+    })),
+
+  updateLayoutItemStatsAnnotationPos: (itemId, xFrac, yFrac) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) => (it.id === itemId ? { ...it, statsAnnotation: { xFrac, yFrac } } : it)),
+    })),
+
+  updateLayoutItemStatsFields: (itemId, fields) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) => (it.id === itemId ? { ...it, statsFields: fields } : it)),
     })),
 
   updateLayoutItemLogScale: (itemId, axis, value) =>
