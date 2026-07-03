@@ -1,4 +1,4 @@
-import type { Panel } from './types';
+import type { Panel, LayoutItem } from './types';
 
 export const DEFAULT_PANEL_WIDTH = 380;
 export const DEFAULT_PANEL_HEIGHT = 360;
@@ -69,5 +69,29 @@ export function autoArrangeAll(panels: Panel[]): Map<string, { x: number; y: num
   }
 
   for (const root of byParent.get(null) ?? []) place(root, 0);
+  return positions;
+}
+
+/** Incremental placement for a newly added layout item: appended to the end of the current row. */
+export function nextLayoutPosition(items: LayoutItem[]): { x: number; y: number } {
+  if (items.length === 0) return { x: PADDING, y: PADDING };
+  const last = items[items.length - 1];
+  return { x: last.x + last.width + GAP_X, y: last.y };
+}
+
+/** Grid re-flow for the Layout collage: items are unrelated (no hierarchy), so this just wraps rows. */
+export function autoArrangeLayoutGrid(items: LayoutItem[], columns = 3): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>();
+  let cursorY = PADDING;
+  for (let start = 0; start < items.length; start += columns) {
+    const rowItems = items.slice(start, start + columns);
+    const rowHeight = Math.max(...rowItems.map((it) => it.height));
+    let cursorX = PADDING;
+    for (const it of rowItems) {
+      positions.set(it.id, { x: cursorX, y: cursorY });
+      cursorX += it.width + GAP_X;
+    }
+    cursorY += rowHeight + GAP_Y;
+  }
   return positions;
 }

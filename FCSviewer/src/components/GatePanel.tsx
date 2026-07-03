@@ -24,9 +24,82 @@ const CLOSE_RADIUS_PX = 9;
 const QUADRANT_LABEL_OFFSET = 6;
 const DEFAULT_GATE_COLOR = '#2ee6a6';
 const DEFAULT_HISTOGRAM_COLOR = '#4f8dff';
+const SHAPE_MOVE_THRESHOLD_PX = 3;
 
 function paramRange(sample: Sample, name: string): number {
   return sample.parameters.find((p) => p.name === name)?.range ?? 1;
+}
+
+// ---- Editable-gate handle geometry (rectangle corners / polygon vertices / range edges) ----
+
+type ShapeHandleKind =
+  | { kind: 'rect-corner'; xField: 'x1' | 'x2'; yField: 'y1' | 'y2' }
+  | { kind: 'polygon-vertex'; index: number }
+  | { kind: 'range-edge'; field: 'min' | 'max' };
+
+interface HandlePoint {
+  handle: ShapeHandleKind;
+  dataX: number;
+  dataY: number | null; // null for range edges, which are drawn/hit-tested at a fixed pixel row
+}
+
+function getEditableShapeHandles(shape: GateShape): HandlePoint[] {
+  if (shape.kind === 'rectangle') {
+    return [
+      { handle: { kind: 'rect-corner', xField: 'x1', yField: 'y1' }, dataX: shape.x1, dataY: shape.y1 },
+      { handle: { kind: 'rect-corner', xField: 'x2', yField: 'y1' }, dataX: shape.x2, dataY: shape.y1 },
+      { handle: { kind: 'rect-corner', xField: 'x1', yField: 'y2' }, dataX: shape.x1, dataY: shape.y2 },
+      { handle: { kind: 'rect-corner', xField: 'x2', yField: 'y2' }, dataX: shape.x2, dataY: shape.y2 },
+    ];
+  }
+  if (shape.kind === 'polygon') {
+    return shape.points.map((p, index) => ({ handle: { kind: 'polygon-vertex', index }, dataX: p.x, dataY: p.y }));
+  }
+  if (shape.kind === 'range') {
+    return [
+      { handle: { kind: 'range-edge', field: 'min' }, dataX: shape.min, dataY: null },
+      { handle: { kind: 'range-edge', field: 'max' }, dataX: shape.max, dataY: null },
+    ];
+  }
+  return [];
+}
+
+function applyHandleDrag(shape: GateShape, handle: ShapeHandleKind, dataX: number, dataY: number): GateShape {
+  if (shape.kind === 'rectangle' && handle.kind === 'rect-corner') {
+    return { ...shape, [handle.xField]: dataX, [handle.yField]: dataY };
+  }
+  if (shape.kind === 'polygon' && handle.kind === 'polygon-vertex') {
+    const points = shape.points.slice();
+    points[handle.index] = { x: dataX, y: dataY };
+    return { ...shape, points };
+  }
+  if (shape.kind === 'range' && handle.kind === 'range-edge') {
+    return { ...shape, [handle.field]: dataX };
+  }
+  return shape;
+}
+
+function translateShape(shape: GateShape, dx: number, dy: number): GateShape {
+  if (shape.kind === 'rectangle') {
+    return { ...shape, x1: shape.x1 + dx, x2: shape.x2 + dx, y1: shape.y1 + dy, y2: shape.y2 + dy };
+  }
+  if (shape.kind === 'polygon') {
+    return { ...shape, points: shape.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
+  }
+  if (shape.kind === 'range') {
+    return { ...shape, min: shape.min + dx, max: shape.max + dx };
+  }
+  return shape;
+}
+
+interface ShapeDragState {
+  gateId: string;
+  origShape: GateShape;
+  kind: 'handle' | 'move';
+  handle?: ShapeHandleKind;
+  startData: Point;
+  startPx: Point;
+  moved: boolean;
 }
 
 interface Props {
@@ -59,6 +132,8 @@ export function GatePanel({
     removePanel,
     renameGate,
     setGateColor,
+    updateGateShape,
+    addToLayout,
   } = useStore();
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -73,6 +148,7 @@ export function GatePanel({
   const [cursorData, setCursorData] = useState<Point | null>(null);
   const [quadrantDraft, setQuadrantDraft] = useState<Point | null>(null);
   const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
+  const [shapeDrag, setShapeDrag] = useState<ShapeDragState | null>(null);
   const suppressNextClick = useRef(false);
   const [pendingShape, setPendingShape] = useState<GateShape | null>(null);
   const [drawing, setDrawing] = useState(false);
@@ -136,6 +212,7 @@ export function GatePanel({
     setPolyPoints([]);
     setQuadrantDraft(null);
     setDraggingGroupId(null);
+    setShapeDrag(null);
     setPendingShape(null);
     setDrawing(false);
   }, [panel.xParam, panel.yParam, panel.plotType, xLog, yLog]);
@@ -335,6 +412,7 @@ export function GatePanel({
       if (!shape) continue;
       if (shape.kind === 'range' && panel.plotType === 'histogram' && shape.param === panel.xParam) {
         drawRangeOverlay(ctx, xToPx, shape.min, shape.max, MARGIN.top, plotHeight, child.name, child.color ?? DEFAULT_GATE_COLOR, false);
+        if (mode === 'none') drawEditHandles(ctx, xToPx, yToPx, shape, child.color ?? DEFAULT_GATE_COLOR);
       } else if (
         (shape.kind === 'rectangle' || shape.kind === 'polygon') &&
         panel.plotType === 'scatter' &&
@@ -342,6 +420,7 @@ export function GatePanel({
         shape.yParam === panel.yParam
       ) {
         drawShapeOverlay(ctx, xToPx, yToPx, shape, child.name, child.color ?? DEFAULT_GATE_COLOR, false);
+        if (mode === 'none') drawEditHandles(ctx, xToPx, yToPx, shape, child.color ?? DEFAULT_GATE_COLOR);
       }
     }
 
@@ -518,6 +597,26 @@ export function GatePanel({
     }
   }
 
+  function drawEditHandles(
+    ctx: CanvasRenderingContext2D,
+    xPx: (raw: number) => number,
+    yPx: (raw: number) => number,
+    shape: GateShape,
+    color: string
+  ) {
+    for (const hp of getEditableShapeHandles(shape)) {
+      const px = xPx(hp.dataX);
+      const py = hp.dataY !== null ? yPx(hp.dataY) : MARGIN.top + plotHeight / 2;
+      ctx.beginPath();
+      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = '#0b0c10';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
   function getMouseData(e: React.MouseEvent<HTMLCanvasElement>): Point {
     const rect = canvasRef.current!.getBoundingClientRect();
     const px = e.clientX - rect.left;
@@ -541,10 +640,60 @@ export function GatePanel({
     return null;
   }
 
+  function shapeMatchesPanelAxes(shape: GateShape): boolean {
+    if (shape.kind === 'quadrant') return false;
+    if (shape.kind === 'range') return panel.plotType === 'histogram' && shape.param === panel.xParam;
+    return panel.plotType === 'scatter' && shape.xParam === panel.xParam && shape.yParam === panel.yParam;
+  }
+
+  // Finds an editable rectangle/polygon/range gate at the cursor: a nearby handle takes
+  // priority (for reshaping), otherwise the shape's body (for moving it as a whole).
+  function findEditableShapeAt(
+    e: React.MouseEvent<HTMLCanvasElement>
+  ): { gateId: string; shape: GateShape; handle?: ShapeHandleKind } | null {
+    const px = getMousePx(e);
+    const data = getMouseData(e);
+    for (const childId of gateNode?.childIds ?? []) {
+      const shape = sample.gates[childId]?.shape;
+      if (!shape || !shapeMatchesPanelAxes(shape)) continue;
+      for (const hp of getEditableShapeHandles(shape)) {
+        const hx = xToPx(hp.dataX);
+        const hy = hp.dataY !== null ? yToPx(hp.dataY) : MARGIN.top + plotHeight / 2;
+        if (Math.hypot(px.x - hx, px.y - hy) <= CLOSE_RADIUS_PX) {
+          return { gateId: childId, shape, handle: hp.handle };
+        }
+      }
+    }
+    for (const childId of gateNode?.childIds ?? []) {
+      const shape = sample.gates[childId]?.shape;
+      if (!shape || !shapeMatchesPanelAxes(shape)) continue;
+      const testY = shape.kind === 'range' ? 0 : data.y;
+      if (shapeContainsPoint(shape, data.x, testY)) {
+        return { gateId: childId, shape };
+      }
+    }
+    return null;
+  }
+
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (mode === 'none') {
       const groupId = findNearbyQuadrantGroup(e);
-      if (groupId) setDraggingGroupId(groupId);
+      if (groupId) {
+        setDraggingGroupId(groupId);
+        return;
+      }
+      const hit = findEditableShapeAt(e);
+      if (hit) {
+        setShapeDrag({
+          gateId: hit.gateId,
+          origShape: hit.shape,
+          kind: hit.handle ? 'handle' : 'move',
+          handle: hit.handle,
+          startData: getMouseData(e),
+          startPx: getMousePx(e),
+          moved: false,
+        });
+      }
       return;
     }
     const data = getMouseData(e);
@@ -578,6 +727,19 @@ export function GatePanel({
       updateQuadrantPosition(sample.id, draggingGroupId, data.x, data.y);
       return;
     }
+    if (shapeDrag) {
+      const px = getMousePx(e);
+      const dist = Math.hypot(px.x - shapeDrag.startPx.x, px.y - shapeDrag.startPx.y);
+      if (dist < SHAPE_MOVE_THRESHOLD_PX) return;
+      const data = getMouseData(e);
+      const nextShape =
+        shapeDrag.kind === 'handle' && shapeDrag.handle
+          ? applyHandleDrag(shapeDrag.origShape, shapeDrag.handle, data.x, data.y)
+          : translateShape(shapeDrag.origShape, data.x - shapeDrag.startData.x, data.y - shapeDrag.startData.y);
+      updateGateShape(sample.id, shapeDrag.gateId, nextShape);
+      if (!shapeDrag.moved) setShapeDrag({ ...shapeDrag, moved: true });
+      return;
+    }
     if (mode === 'polygon' && polyPoints.length > 0) {
       setCursorData(getMouseData(e));
     }
@@ -596,6 +758,11 @@ export function GatePanel({
     if (draggingGroupId) {
       setDraggingGroupId(null);
       suppressNextClick.current = true;
+      return;
+    }
+    if (shapeDrag) {
+      if (shapeDrag.moved) suppressNextClick.current = true;
+      setShapeDrag(null);
       return;
     }
     if (!drawing) return;
@@ -734,6 +901,14 @@ export function GatePanel({
           </span>
         )}
         <button
+          className="gate-panel-layout-btn"
+          title="Add this panel to the Layout collage"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => addToLayout(sample.id, panel.id)}
+        >
+          ⊞
+        </button>
+        <button
           className="gate-panel-close"
           title="Close this panel"
           onMouseDown={(e) => e.stopPropagation()}
@@ -864,7 +1039,14 @@ export function GatePanel({
           onMouseUp={handleMouseUp}
           onDoubleClick={handleDoubleClick}
           onClick={handleClick}
-          style={{ cursor: draggingGroupId ? 'grabbing' : mode !== 'none' ? 'crosshair' : 'pointer' }}
+          style={{
+            cursor:
+              draggingGroupId || shapeDrag
+                ? 'grabbing'
+                : mode !== 'none'
+                  ? 'crosshair'
+                  : 'pointer',
+          }}
         />
       </div>
       {pendingShape && (

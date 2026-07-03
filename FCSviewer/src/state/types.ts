@@ -24,6 +24,31 @@ export interface Panel {
   height: number;
 }
 
+/**
+ * An item in the cross-sample "Layout" collage: a curated, independently
+ * labeled/positioned copy of a panel's view (which sample, which population,
+ * which axes) for assembling a publish-quality figure. Decoupled from the
+ * source panel so moving/resizing/relabeling it here never touches the
+ * sample's own analysis workspace, and removing the source panel doesn't
+ * remove it from the layout.
+ */
+export interface LayoutItem {
+  id: string;
+  sampleId: string;
+  gateId: string;
+  /** Figure caption, independent of the gate's own name. */
+  label: string;
+  xParam: string;
+  yParam: string;
+  plotType: 'scatter' | 'histogram';
+  xLogScale: boolean;
+  yLogScale: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface Sample {
   id: string;
   fileName: string;

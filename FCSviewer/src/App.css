@@ -357,7 +357,8 @@
 .gate-color-clear:hover {
   color: #ff6b6b;
 }
-.gate-panel-close {
+.gate-panel-close,
+.gate-panel-layout-btn {
   background: none;
   border: none;
   color: #8b93a1;
@@ -369,6 +370,36 @@
 }
 .gate-panel-close:hover {
   color: #ff6b6b;
+}
+.gate-panel-layout-btn:hover {
+  color: #4f8dff;
+}
+.layout-panel-missing {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+  font-size: 12px;
+  text-align: center;
+  padding: 12px;
+}
+.layout-sidebar-hint {
+  font-size: 11.5px;
+  color: #6b7280;
+  line-height: 1.5;
+  margin: 0;
+}
+.layout-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #8b93a1;
+  gap: 6px;
+  text-align: center;
+  padding: 24px;
 }
 .gate-panel-resize-handle {
   position: absolute;

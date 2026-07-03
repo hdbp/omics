@@ -8,12 +8,14 @@ import { makeId } from '../utils/id';
 import {
   nextPanelPosition,
   autoArrangeAll,
+  nextLayoutPosition,
+  autoArrangeLayoutGrid,
   DEFAULT_PANEL_WIDTH,
   DEFAULT_PANEL_HEIGHT,
   MIN_PANEL_WIDTH,
   MIN_PANEL_HEIGHT,
 } from './panelLayout';
-import type { Sample, Panel } from './types';
+import type { Sample, Panel, LayoutItem } from './types';
 import type { FCSParameter } from '../fcs/types';
 
 const QUADRANT_IDS: QuadrantId[] = ['UL', 'UR', 'LL', 'LR'];
@@ -101,6 +103,13 @@ interface AppState {
   /** Panel to scroll into view / briefly highlight, set right after it's created or focused. */
   focusedPanelId: string | null;
 
+  /** The cross-sample collage of curated panels, for assembling a publish-quality figure. */
+  layoutItems: LayoutItem[];
+  focusedLayoutItemId: string | null;
+  /** Which main-content view is showing: the active sample's analysis workspace, or the Layout collage. */
+  mainView: 'samples' | 'layout';
+  setMainView: (view: 'samples' | 'layout') => void;
+
   loadFiles: (files: FileList | File[]) => Promise<void>;
   removeSample: (sampleId: string) => void;
   selectSample: (sampleId: string) => void;
@@ -127,9 +136,23 @@ interface AppState {
   updateQuadrantPosition: (sampleId: string, groupId: string, x: number, y: number) => void;
   renameGate: (sampleId: string, gateId: string, name: string) => void;
   setGateColor: (sampleId: string, gateId: string, color: string | null) => void;
+  /** Reshapes/moves an existing rectangle/polygon/range gate. Any panel viewing it (or a descendant) recomputes live. */
+  updateGateShape: (sampleId: string, gateId: string, shape: GateShape) => void;
   deleteGate: (sampleId: string, gateId: string) => void;
 
   applyGatingStrategy: (sourceSampleId: string, targetSampleIds: string[]) => void;
+
+  /** Copies a panel's current view (population, axes, plot type, scale) into the Layout collage. Returns the new item id. */
+  addToLayout: (sampleId: string, panelId: string) => string;
+  updateLayoutItemAxis: (itemId: string, axis: 'xParam' | 'yParam', value: string) => void;
+  updateLayoutItemPlotType: (itemId: string, plotType: 'scatter' | 'histogram') => void;
+  updateLayoutItemLogScale: (itemId: string, axis: 'xLogScale' | 'yLogScale', value: boolean) => void;
+  relabelLayoutItem: (itemId: string, label: string) => void;
+  moveLayoutItem: (itemId: string, x: number, y: number) => void;
+  resizeLayoutItem: (itemId: string, width: number, height: number) => void;
+  removeLayoutItem: (itemId: string) => void;
+  autoArrangeLayout: () => void;
+  focusLayoutItem: (itemId: string | null) => void;
 }
 
 function updateSample(samples: Sample[], sampleId: string, fn: (s: Sample) => Sample): Sample[] {
@@ -143,10 +166,14 @@ export const useStore = create<AppState>((set, get) => ({
   error: null,
   notice: null,
   focusedPanelId: null,
+  layoutItems: [],
+  focusedLayoutItemId: null,
+  mainView: 'samples',
 
   clearError: () => set({ error: null }),
   clearNotice: () => set({ notice: null }),
   focusPanel: (panelId) => set({ focusedPanelId: panelId }),
+  setMainView: (view) => set({ mainView: view }),
 
   loadFiles: async (fileList) => {
     const files = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith('.fcs'));
@@ -197,7 +224,8 @@ export const useStore = create<AppState>((set, get) => ({
       const samples = state.samples.filter((s) => s.id !== sampleId);
       const activeSampleId =
         state.activeSampleId === sampleId ? (samples[0]?.id ?? null) : state.activeSampleId;
-      return { samples, activeSampleId };
+      const layoutItems = state.layoutItems.filter((it) => it.sampleId !== sampleId);
+      return { samples, activeSampleId, layoutItems };
     }),
 
   selectSample: (sampleId) => set({ activeSampleId: sampleId }),
@@ -388,11 +416,21 @@ export const useStore = create<AppState>((set, get) => ({
       })),
     })),
 
+  updateGateShape: (sampleId, gateId, shape) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => ({
+        ...s,
+        gates: { ...s.gates, [gateId]: { ...s.gates[gateId], shape } },
+      })),
+    })),
+
   deleteGate: (sampleId, gateId) => {
     if (gateId === ROOT_GATE_ID) return;
+    const sample = get().samples.find((s) => s.id === sampleId);
+    if (!sample) return;
+    const toRemove = new Set([gateId, ...getDescendantIds(sample.gates, gateId)]);
     set((state) => ({
       samples: updateSample(state.samples, sampleId, (s) => {
-        const toRemove = new Set([gateId, ...getDescendantIds(s.gates, gateId)]);
         const gates: Sample['gates'] = {};
         for (const [id, node] of Object.entries(s.gates)) {
           if (toRemove.has(id)) continue;
@@ -417,6 +455,8 @@ export const useStore = create<AppState>((set, get) => ({
         }
         return { ...s, gates, panels };
       }),
+      // Layout items are a curated copy, but one referencing a now-deleted population can't render.
+      layoutItems: state.layoutItems.filter((it) => !(it.sampleId === sampleId && toRemove.has(it.gateId))),
     }));
   },
 
@@ -437,12 +477,87 @@ export const useStore = create<AppState>((set, get) => ({
         const panels = clonePanels(source.panels, idMap, s.paramIndex, s.parameters);
         return { ...s, gates, panels };
       }),
+      // Old gate ids for each target sample no longer exist; drop any layout items built from them.
+      layoutItems: state.layoutItems.filter((it) => !targetSampleIds.includes(it.sampleId)),
     }));
 
     const appliedCount = targetSampleIds.length;
     const summary = `Applied gating strategy and panel layout from "${source.fileName}" to ${appliedCount} sample${appliedCount === 1 ? '' : 's'}.`;
     set({ notice: noticeLines.length > 0 ? `${summary}\n${noticeLines.join('\n')}` : summary });
   },
+
+  addToLayout: (sampleId, panelId) => {
+    const sample = get().samples.find((s) => s.id === sampleId);
+    const panel = sample?.panels.find((p) => p.id === panelId);
+    let newId = '';
+    if (!sample || !panel) return newId;
+    const label = sample.gates[panel.gateId]?.name ?? 'Population';
+    set((state) => {
+      const pos = nextLayoutPosition(state.layoutItems);
+      const item: LayoutItem = {
+        id: makeId('layout'),
+        sampleId,
+        gateId: panel.gateId,
+        label,
+        xParam: panel.xParam,
+        yParam: panel.yParam,
+        plotType: panel.plotType,
+        xLogScale: panel.xLogScale,
+        yLogScale: panel.yLogScale,
+        x: pos.x,
+        y: pos.y,
+        width: panel.width,
+        height: panel.height,
+      };
+      newId = item.id;
+      return { layoutItems: [...state.layoutItems, item] };
+    });
+    set({ focusedLayoutItemId: newId, mainView: 'layout' });
+    return newId;
+  },
+
+  updateLayoutItemAxis: (itemId, axis, value) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) => (it.id === itemId ? { ...it, [axis]: value } : it)),
+    })),
+
+  updateLayoutItemPlotType: (itemId, plotType) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) => (it.id === itemId ? { ...it, plotType } : it)),
+    })),
+
+  updateLayoutItemLogScale: (itemId, axis, value) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) => (it.id === itemId ? { ...it, [axis]: value } : it)),
+    })),
+
+  relabelLayoutItem: (itemId, label) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) => (it.id === itemId ? { ...it, label } : it)),
+    })),
+
+  moveLayoutItem: (itemId, x, y) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) => (it.id === itemId ? { ...it, x, y } : it)),
+    })),
+
+  resizeLayoutItem: (itemId, width, height) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) =>
+        it.id === itemId ? { ...it, width: Math.max(MIN_PANEL_WIDTH, width), height: Math.max(MIN_PANEL_HEIGHT, height) } : it
+      ),
+    })),
+
+  removeLayoutItem: (itemId) =>
+    set((state) => ({ layoutItems: state.layoutItems.filter((it) => it.id !== itemId) })),
+
+  autoArrangeLayout: () =>
+    set((state) => {
+      const positions = autoArrangeLayoutGrid(state.layoutItems);
+      return { layoutItems: state.layoutItems.map((it) => ({ ...it, ...(positions.get(it.id) ?? {}) })) };
+    }),
+
+  focusLayoutItem: (itemId) => set({ focusedLayoutItemId: itemId }),
 }));
 
 export function getActiveSample(state: AppState): Sample | null {

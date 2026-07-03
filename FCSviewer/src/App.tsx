@@ -4,6 +4,8 @@ import { FileLoader } from './components/FileLoader';
 import { SampleList } from './components/SampleList';
 import { GateTree } from './components/GateTree';
 import { PanelWorkspace } from './components/PanelWorkspace';
+import { LayoutWorkspace } from './components/LayoutWorkspace';
+import { LayoutSidebar } from './components/LayoutSidebar';
 import { StatsTable } from './components/StatsTable';
 import { computeGateStats } from './gating/gateStats';
 import './App.css';
@@ -31,10 +33,13 @@ function App() {
             </div>
           )}
           <SampleList />
-          {sample && <GateTree sample={sample} stats={stats} />}
+          {sample && state.mainView === 'samples' && <GateTree sample={sample} stats={stats} />}
+          <LayoutSidebar />
         </aside>
         <main className="main-content">
-          {sample ? (
+          {state.mainView === 'layout' ? (
+            <LayoutWorkspace />
+          ) : sample ? (
             <>
               <PanelWorkspace sample={sample} />
               <StatsTable sample={sample} stats={stats} />
