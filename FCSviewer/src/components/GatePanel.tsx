@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { getColumn, type Sample, type Panel } from '../state/types';
 import { ancestorChain, getGateEventIndices, shapeContainsPoint } from '../gating/gateEval';
+import { ROOT_GATE_ID } from '../gating/gateTypes';
 import type { GateShape, Point, QuadrantId } from '../gating/gateTypes';
 import {
   makeScale,
@@ -13,15 +14,16 @@ import {
   plotValueToData,
   type LinearScale,
 } from '../utils/scale';
-import { densityColor } from '../utils/colormap';
+import { densityColor, hexToRgba } from '../utils/colormap';
 import { GateNameDialog } from './GateNameDialog';
-import { PANEL_WIDTH, PANEL_HEIGHT } from '../state/panelLayout';
 
 type Mode = 'none' | 'rectangle' | 'polygon' | 'range' | 'quadrant';
 
 const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
 const CLOSE_RADIUS_PX = 9;
 const QUADRANT_LABEL_OFFSET = 6;
+const DEFAULT_GATE_COLOR = '#2ee6a6';
+const DEFAULT_HISTOGRAM_COLOR = '#4f8dff';
 
 function paramRange(sample: Sample, name: string): number {
   return sample.parameters.find((p) => p.name === name)?.range ?? 1;
@@ -32,11 +34,20 @@ interface Props {
   panel: Panel;
   isFocused: boolean;
   onDragHandleDown: (e: React.MouseEvent) => void;
+  onResizeHandleDown: (e: React.MouseEvent) => void;
   onRegisterCanvas: (panelId: string, el: HTMLCanvasElement | null) => void;
   onRegisterRoot: (panelId: string, el: HTMLDivElement | null) => void;
 }
 
-export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegisterCanvas, onRegisterRoot }: Props) {
+export function GatePanel({
+  sample,
+  panel,
+  isFocused,
+  onDragHandleDown,
+  onResizeHandleDown,
+  onRegisterCanvas,
+  onRegisterRoot,
+}: Props) {
   const {
     updatePanelAxis,
     updatePanelPlotType,
@@ -46,10 +57,14 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     updateQuadrantPosition,
     addChildPanel,
     removePanel,
+    renameGate,
+    setGateColor,
   } = useStore();
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleValue, setTitleValue] = useState('');
   const [size, setSize] = useState({ width: 340, height: 230 });
   const [mode, setMode] = useState<Mode>('none');
   const [rectDraft, setRectDraft] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
@@ -127,12 +142,17 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
 
   // Distinct quadrant-gate groups (crosshair placements) among this panel's own child gates.
   const quadrantGroups = useMemo(() => {
-    const groups = new Map<string, { x: number; y: number; labels: Partial<Record<QuadrantId, string>> }>();
+    const groups = new Map<
+      string,
+      { x: number; y: number; labels: Partial<Record<QuadrantId, string>>; colors: Partial<Record<QuadrantId, string>> }
+    >();
     for (const childId of gateNode?.childIds ?? []) {
-      const shape = sample.gates[childId]?.shape;
+      const child = sample.gates[childId];
+      const shape = child?.shape;
       if (shape?.kind !== 'quadrant' || shape.xParam !== panel.xParam || shape.yParam !== panel.yParam) continue;
-      const group = groups.get(shape.groupId) ?? { x: shape.x, y: shape.y, labels: {} };
-      group.labels[shape.quadrant] = sample.gates[childId].name;
+      const group = groups.get(shape.groupId) ?? { x: shape.x, y: shape.y, labels: {}, colors: {} };
+      group.labels[shape.quadrant] = child.name;
+      if (child.color) group.colors[shape.quadrant] = child.color;
       groups.set(shape.groupId, group);
     }
     return groups;
@@ -281,9 +301,10 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     ctx.rect(MARGIN.left, MARGIN.top, plotWidth, plotHeight);
     ctx.clip();
 
+    const ownColor = gateNode?.color;
     if (panel.plotType === 'histogram' && histogram) {
       const binWidth = plotWidth / histogram.nBins;
-      ctx.fillStyle = '#4f8dff';
+      ctx.fillStyle = ownColor ?? DEFAULT_HISTOGRAM_COLOR;
       for (let b = 0; b < histogram.nBins; b++) {
         const c = histogram.counts[b];
         if (c === 0) continue;
@@ -294,13 +315,16 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     } else if (panel.plotType === 'scatter' && densityGrid) {
       const xCol = getColumn(sample, panel.xParam);
       const yCol = getColumn(sample, panel.yParam);
+      if (ownColor) ctx.fillStyle = ownColor;
       for (let i = 0; i < indices.length; i++) {
         const idx = indices[i];
         const px = xToPx(xCol[idx]);
         const py = yToPx(yCol[idx]);
-        const count = densityGrid.counts[densityGrid.binOf[i]];
-        const t = Math.log1p(count) / Math.log1p(densityGrid.maxCount);
-        ctx.fillStyle = densityColor(t);
+        if (!ownColor) {
+          const count = densityGrid.counts[densityGrid.binOf[i]];
+          const t = Math.log1p(count) / Math.log1p(densityGrid.maxCount);
+          ctx.fillStyle = densityColor(t);
+        }
         ctx.fillRect(px - 1, py - 1, 2, 2);
       }
     }
@@ -310,25 +334,25 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
       const shape = child.shape;
       if (!shape) continue;
       if (shape.kind === 'range' && panel.plotType === 'histogram' && shape.param === panel.xParam) {
-        drawRangeOverlay(ctx, xToPx, shape.min, shape.max, MARGIN.top, plotHeight, child.name, false);
+        drawRangeOverlay(ctx, xToPx, shape.min, shape.max, MARGIN.top, plotHeight, child.name, child.color ?? DEFAULT_GATE_COLOR, false);
       } else if (
         (shape.kind === 'rectangle' || shape.kind === 'polygon') &&
         panel.plotType === 'scatter' &&
         shape.xParam === panel.xParam &&
         shape.yParam === panel.yParam
       ) {
-        drawShapeOverlay(ctx, xToPx, yToPx, shape, child.name, false);
+        drawShapeOverlay(ctx, xToPx, yToPx, shape, child.name, child.color ?? DEFAULT_GATE_COLOR, false);
       }
     }
 
     if (panel.plotType === 'scatter') {
       for (const group of quadrantGroups.values()) {
-        drawQuadrantCrosshair(ctx, xToPx, yToPx, group.x, group.y, group.labels, false);
+        drawQuadrantCrosshair(ctx, xToPx, yToPx, group.x, group.y, group.labels, group.colors, false);
       }
     }
 
     if (mode === 'quadrant' && quadrantDraft) {
-      drawQuadrantCrosshair(ctx, xToPx, yToPx, quadrantDraft.x, quadrantDraft.y, null, true);
+      drawQuadrantCrosshair(ctx, xToPx, yToPx, quadrantDraft.x, quadrantDraft.y, null, null, true);
     }
 
     if (mode === 'rectangle' && rectDraft) {
@@ -338,11 +362,12 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
         yToPx,
         { kind: 'rectangle', xParam: panel.xParam, yParam: panel.yParam, ...rectDraft },
         '',
+        DEFAULT_GATE_COLOR,
         true
       );
     }
     if (mode === 'range' && rangeDraft) {
-      drawRangeOverlay(ctx, xToPx, rangeDraft.min, rangeDraft.max, MARGIN.top, plotHeight, '', true);
+      drawRangeOverlay(ctx, xToPx, rangeDraft.min, rangeDraft.max, MARGIN.top, plotHeight, '', DEFAULT_GATE_COLOR, true);
     }
     if (mode === 'polygon' && polyPoints.length > 0) {
       ctx.strokeStyle = '#ff9f1c';
@@ -376,9 +401,10 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     yPx: (raw: number) => number,
     shape: GateShape,
     label: string,
+    color: string,
     isDraft: boolean
   ) {
-    ctx.strokeStyle = isDraft ? '#ff9f1c' : '#2ee6a6';
+    ctx.strokeStyle = isDraft ? '#ff9f1c' : color;
     ctx.lineWidth = 1.5;
     ctx.setLineDash(isDraft ? [5, 3] : []);
     let labelX = MARGIN.left;
@@ -408,7 +434,7 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     }
     ctx.setLineDash([]);
     if (label) {
-      ctx.fillStyle = '#2ee6a6';
+      ctx.fillStyle = isDraft ? '#ff9f1c' : color;
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(label, labelX, labelY);
@@ -423,13 +449,14 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     top: number,
     height: number,
     label: string,
+    color: string,
     isDraft: boolean
   ) {
     const x1 = xPx(Math.min(min, max));
     const x2 = xPx(Math.max(min, max));
-    ctx.fillStyle = isDraft ? 'rgba(255,159,28,0.15)' : 'rgba(46,230,166,0.12)';
+    ctx.fillStyle = isDraft ? 'rgba(255,159,28,0.15)' : hexToRgba(color, 0.12);
     ctx.fillRect(x1, top, x2 - x1, height);
-    ctx.strokeStyle = isDraft ? '#ff9f1c' : '#2ee6a6';
+    ctx.strokeStyle = isDraft ? '#ff9f1c' : color;
     ctx.setLineDash(isDraft ? [5, 3] : []);
     ctx.beginPath();
     ctx.moveTo(x1, top);
@@ -439,7 +466,7 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     ctx.stroke();
     ctx.setLineDash([]);
     if (label) {
-      ctx.fillStyle = '#2ee6a6';
+      ctx.fillStyle = isDraft ? '#ff9f1c' : color;
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(label, x1 + 3, top + 12);
@@ -453,11 +480,12 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     x: number,
     y: number,
     labels: Partial<Record<QuadrantId, string>> | null,
+    labelColors: Partial<Record<QuadrantId, string>> | null,
     isDraft: boolean
   ) {
     const px = xPx(x);
     const py = yPx(y);
-    ctx.strokeStyle = isDraft ? '#ff9f1c' : '#2ee6a6';
+    ctx.strokeStyle = isDraft ? '#ff9f1c' : DEFAULT_GATE_COLOR;
     ctx.lineWidth = 1.25;
     ctx.setLineDash(isDraft ? [5, 3] : []);
     ctx.beginPath();
@@ -469,13 +497,24 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     ctx.setLineDash([]);
     if (labels) {
       ctx.font = '10px system-ui, sans-serif';
-      ctx.fillStyle = '#2ee6a6';
       ctx.textAlign = 'right';
-      if (labels.UL) ctx.fillText(labels.UL, px - QUADRANT_LABEL_OFFSET, MARGIN.top + 10);
-      if (labels.LL) ctx.fillText(labels.LL, px - QUADRANT_LABEL_OFFSET, MARGIN.top + plotHeight - 4);
+      if (labels.UL) {
+        ctx.fillStyle = labelColors?.UL ?? DEFAULT_GATE_COLOR;
+        ctx.fillText(labels.UL, px - QUADRANT_LABEL_OFFSET, MARGIN.top + 10);
+      }
+      if (labels.LL) {
+        ctx.fillStyle = labelColors?.LL ?? DEFAULT_GATE_COLOR;
+        ctx.fillText(labels.LL, px - QUADRANT_LABEL_OFFSET, MARGIN.top + plotHeight - 4);
+      }
       ctx.textAlign = 'left';
-      if (labels.UR) ctx.fillText(labels.UR, px + QUADRANT_LABEL_OFFSET, MARGIN.top + 10);
-      if (labels.LR) ctx.fillText(labels.LR, px + QUADRANT_LABEL_OFFSET, MARGIN.top + plotHeight - 4);
+      if (labels.UR) {
+        ctx.fillStyle = labelColors?.UR ?? DEFAULT_GATE_COLOR;
+        ctx.fillText(labels.UR, px + QUADRANT_LABEL_OFFSET, MARGIN.top + 10);
+      }
+      if (labels.LR) {
+        ctx.fillStyle = labelColors?.LR ?? DEFAULT_GATE_COLOR;
+        ctx.fillText(labels.LR, px + QUADRANT_LABEL_OFFSET, MARGIN.top + plotHeight - 4);
+      }
     }
   }
 
@@ -634,12 +673,66 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
     <div
       ref={rootRef}
       className={`gate-panel ${isFocused ? 'gate-panel-focused' : ''}`}
-      style={{ left: panel.x, top: panel.y, width: PANEL_WIDTH, height: PANEL_HEIGHT }}
+      style={{ left: panel.x, top: panel.y, width: panel.width, height: panel.height }}
     >
       <div className="gate-panel-header" onMouseDown={onDragHandleDown}>
-        <span className="gate-panel-title" title={path.map((n) => n.name).join(' › ')}>
-          {gateNode?.name ?? 'Population'}
-        </span>
+        {panel.gateId !== ROOT_GATE_ID && (
+          <span className="gate-color-swatch-wrap" onMouseDown={(e) => e.stopPropagation()}>
+            <input
+              type="color"
+              className="gate-color-swatch"
+              title="Set population color"
+              value={gateNode?.color ?? '#2ee6a6'}
+              onChange={(e) => setGateColor(sample.id, panel.gateId, e.target.value)}
+            />
+            {gateNode?.color && (
+              <button
+                className="gate-color-clear"
+                title="Reset to default color"
+                onClick={() => setGateColor(sample.id, panel.gateId, null)}
+              >
+                ×
+              </button>
+            )}
+          </span>
+        )}
+        {editingTitle ? (
+          <input
+            autoFocus
+            className="gate-panel-title-input"
+            value={titleValue}
+            onMouseDown={(e) => e.stopPropagation()}
+            onChange={(e) => setTitleValue(e.target.value)}
+            onBlur={() => {
+              if (titleValue.trim()) renameGate(sample.id, panel.gateId, titleValue.trim());
+              setEditingTitle(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                if (titleValue.trim()) renameGate(sample.id, panel.gateId, titleValue.trim());
+                setEditingTitle(false);
+              }
+              if (e.key === 'Escape') setEditingTitle(false);
+            }}
+          />
+        ) : (
+          <span
+            className="gate-panel-title"
+            title={
+              panel.gateId === ROOT_GATE_ID
+                ? path.map((n) => n.name).join(' › ')
+                : `${path.map((n) => n.name).join(' › ')} (double-click to rename)`
+            }
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              if (panel.gateId === ROOT_GATE_ID) return;
+              setTitleValue(gateNode?.name ?? '');
+              setEditingTitle(true);
+            }}
+          >
+            {gateNode?.name ?? 'Population'}
+          </span>
+        )}
         <button
           className="gate-panel-close"
           title="Close this panel"
@@ -781,6 +874,7 @@ export function GatePanel({ sample, panel, isFocused, onDragHandleDown, onRegist
           onCancel={() => setPendingShape(null)}
         />
       )}
+      <div className="gate-panel-resize-handle" title="Drag to resize" onMouseDown={onResizeHandleDown} />
     </div>
   );
 }

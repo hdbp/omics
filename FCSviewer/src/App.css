@@ -303,9 +303,59 @@
   cursor: grabbing;
 }
 .gate-panel-title {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: text;
+}
+.gate-panel-title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.gate-color-swatch-wrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.gate-color-swatch {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid #3a3f4b;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  overflow: hidden;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.gate-color-swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.gate-color-swatch::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+.gate-color-swatch::-moz-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+.gate-color-clear {
+  background: none;
+  border: none;
+  color: #8b93a1;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0;
+}
+.gate-color-clear:hover {
+  color: #ff6b6b;
 }
 .gate-panel-close {
   background: none;
@@ -319,6 +369,20 @@
 }
 .gate-panel-close:hover {
   color: #ff6b6b;
+}
+.gate-panel-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, #4b5160 50%, #4b5160 62%, transparent 62%, transparent 74%, #4b5160 74%, #4b5160 86%, transparent 86%);
+  opacity: 0.7;
+}
+.gate-panel-resize-handle:hover {
+  opacity: 1;
+  background: linear-gradient(135deg, transparent 50%, #2ee6a6 50%, #2ee6a6 62%, transparent 62%, transparent 74%, #2ee6a6 74%, #2ee6a6 86%, transparent 86%);
 }
 .gate-panel-path {
   font-size: 10px;

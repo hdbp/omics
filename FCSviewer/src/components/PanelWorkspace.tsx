@@ -3,7 +3,7 @@ import { useStore } from '../state/store';
 import type { Sample } from '../state/types';
 import { ancestorChain } from '../gating/gateEval';
 import { GatePanel } from './GatePanel';
-import { PANEL_WIDTH, PANEL_HEIGHT, PADDING } from '../state/panelLayout';
+import { PADDING, MIN_PANEL_WIDTH, MIN_PANEL_HEIGHT } from '../state/panelLayout';
 import { downloadCanvasAsPng, truncateText } from '../utils/exportImage';
 
 interface DragState {
@@ -14,11 +14,20 @@ interface DragState {
   origY: number;
 }
 
+interface ResizeState {
+  panelId: string;
+  startX: number;
+  startY: number;
+  origWidth: number;
+  origHeight: number;
+}
+
 export function PanelWorkspace({ sample }: { sample: Sample }) {
-  const { movePanel, autoArrangePanels, focusedPanelId, focusPanel } = useStore();
+  const { movePanel, resizePanel, autoArrangePanels, focusedPanelId, focusPanel } = useStore();
   const canvasRefs = useRef(new Map<string, HTMLCanvasElement>());
   const rootRefs = useRef(new Map<string, HTMLDivElement>());
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [resizeState, setResizeState] = useState<ResizeState | null>(null);
 
   useEffect(() => {
     if (!focusedPanelId) return;
@@ -45,9 +54,33 @@ export function PanelWorkspace({ sample }: { sample: Sample }) {
     };
   }, [dragState, sample.id, movePanel]);
 
+  useEffect(() => {
+    if (!resizeState) return;
+    function onMove(e: MouseEvent) {
+      if (!resizeState) return;
+      const dx = e.clientX - resizeState.startX;
+      const dy = e.clientY - resizeState.startY;
+      resizePanel(
+        sample.id,
+        resizeState.panelId,
+        Math.max(MIN_PANEL_WIDTH, resizeState.origWidth + dx),
+        Math.max(MIN_PANEL_HEIGHT, resizeState.origHeight + dy)
+      );
+    }
+    function onUp() {
+      setResizeState(null);
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [resizeState, sample.id, resizePanel]);
+
   const contentSize = useMemo(() => {
-    const maxX = sample.panels.reduce((m, p) => Math.max(m, p.x + PANEL_WIDTH), 0) + PADDING;
-    const maxY = sample.panels.reduce((m, p) => Math.max(m, p.y + PANEL_HEIGHT), 0) + PADDING;
+    const maxX = sample.panels.reduce((m, p) => Math.max(m, p.x + p.width), 0) + PADDING;
+    const maxY = sample.panels.reduce((m, p) => Math.max(m, p.y + p.height), 0) + PADDING;
     return { width: maxX, height: maxY };
   }, [sample.panels]);
 
@@ -58,10 +91,10 @@ export function PanelWorkspace({ sample }: { sample: Sample }) {
       const parent = sample.panels.find((pp) => pp.id === p.parentPanelId);
       if (!parent) continue;
       lines.push({
-        x1: parent.x + PANEL_WIDTH,
-        y1: parent.y + PANEL_HEIGHT / 2,
+        x1: parent.x + parent.width,
+        y1: parent.y + parent.height / 2,
         x2: p.x,
-        y2: p.y + PANEL_HEIGHT / 2,
+        y2: p.y + p.height / 2,
         key: `${parent.id}-${p.id}`,
       });
     }
@@ -96,12 +129,12 @@ export function PanelWorkspace({ sample }: { sample: Sample }) {
       ctx.lineWidth = 1;
       if (typeof ctx.roundRect === 'function') {
         ctx.beginPath();
-        ctx.roundRect(p.x, p.y, PANEL_WIDTH, PANEL_HEIGHT, 8);
+        ctx.roundRect(p.x, p.y, p.width, p.height, 8);
         ctx.fill();
         ctx.stroke();
       } else {
-        ctx.fillRect(p.x, p.y, PANEL_WIDTH, PANEL_HEIGHT);
-        ctx.strokeRect(p.x, p.y, PANEL_WIDTH, PANEL_HEIGHT);
+        ctx.fillRect(p.x, p.y, p.width, p.height);
+        ctx.strokeRect(p.x, p.y, p.width, p.height);
       }
 
       const gateName = sample.gates[p.gateId]?.name ?? 'Population';
@@ -167,6 +200,17 @@ export function PanelWorkspace({ sample }: { sample: Sample }) {
               onDragHandleDown={(e) =>
                 setDragState({ panelId: panel.id, startX: e.clientX, startY: e.clientY, origX: panel.x, origY: panel.y })
               }
+              onResizeHandleDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setResizeState({
+                  panelId: panel.id,
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  origWidth: panel.width,
+                  origHeight: panel.height,
+                });
+              }}
               onRegisterCanvas={(id, el) => {
                 if (el) canvasRefs.current.set(id, el);
                 else canvasRefs.current.delete(id);

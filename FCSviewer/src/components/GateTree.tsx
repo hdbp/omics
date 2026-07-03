@@ -6,7 +6,7 @@ import type { GateStat } from '../gating/gateStats';
 import { ApplyGatesDialog } from './ApplyGatesDialog';
 
 export function GateTree({ sample, stats }: { sample: Sample; stats: GateStat[] }) {
-  const { samples, focusPanelForGate, renameGate, deleteGate, applyGatingStrategy } = useStore();
+  const { samples, focusPanelForGate, renameGate, deleteGate, applyGatingStrategy, setGateColor } = useStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [applyDialogOpen, setApplyDialogOpen] = useState(false);
@@ -31,6 +31,15 @@ export function GateTree({ sample, stats }: { sample: Sample; stats: GateStat[] 
             className={`gate-item ${sample.panels.some((p) => p.gateId === s.gateId) ? 'gate-item-active' : ''}`}
             style={{ paddingLeft: 8 + s.depth * 16 }}
           >
+            {s.gateId !== ROOT_GATE_ID && (
+              <input
+                type="color"
+                className="gate-color-swatch"
+                title="Set population color"
+                value={sample.gates[s.gateId]?.color ?? '#2ee6a6'}
+                onChange={(e) => setGateColor(sample.id, s.gateId, e.target.value)}
+              />
+            )}
             {editingId === s.gateId ? (
               <input
                 autoFocus

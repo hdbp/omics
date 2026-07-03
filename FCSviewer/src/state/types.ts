@@ -20,6 +20,8 @@ export interface Panel {
   /** Position within the sample's workspace canvas, in px. */
   x: number;
   y: number;
+  width: number;
+  height: number;
 }
 
 export interface Sample {

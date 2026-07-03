@@ -5,7 +5,14 @@ import type { GateShape, QuadrantId } from '../gating/gateTypes';
 import { getDescendantIds } from '../gating/gateEval';
 import { cloneGateTree } from '../gating/gateClone';
 import { makeId } from '../utils/id';
-import { nextPanelPosition, autoArrangeAll } from './panelLayout';
+import {
+  nextPanelPosition,
+  autoArrangeAll,
+  DEFAULT_PANEL_WIDTH,
+  DEFAULT_PANEL_HEIGHT,
+  MIN_PANEL_WIDTH,
+  MIN_PANEL_HEIGHT,
+} from './panelLayout';
 import type { Sample, Panel } from './types';
 import type { FCSParameter } from '../fcs/types';
 
@@ -58,6 +65,8 @@ function clonePanels(
       yLogScale: src.yLogScale,
       x: src.x,
       y: src.y,
+      width: src.width,
+      height: src.height,
     };
     panelIdMap.set(src.id, panel.id);
     panels.push(panel);
@@ -78,6 +87,8 @@ function createRootPanel(parameters: FCSParameter[]): Panel {
     yLogScale: false,
     x: 24,
     y: 24,
+    width: DEFAULT_PANEL_WIDTH,
+    height: DEFAULT_PANEL_HEIGHT,
   };
 }
 
@@ -100,6 +111,7 @@ interface AppState {
   updatePanelPlotType: (sampleId: string, panelId: string, plotType: 'scatter' | 'histogram') => void;
   updatePanelLogScale: (sampleId: string, panelId: string, axis: 'xLogScale' | 'yLogScale', value: boolean) => void;
   movePanel: (sampleId: string, panelId: string, x: number, y: number) => void;
+  resizePanel: (sampleId: string, panelId: string, width: number, height: number) => void;
   removePanel: (sampleId: string, panelId: string) => void;
   autoArrangePanels: (sampleId: string) => void;
   /** Creates (or reuses) a child panel viewing `gateId`, drilled down from `parentPanelId`. Returns its id. */
@@ -114,6 +126,7 @@ interface AppState {
   /** Live-updates the shared crosshair position for all 4 gates in a quadrant group. */
   updateQuadrantPosition: (sampleId: string, groupId: string, x: number, y: number) => void;
   renameGate: (sampleId: string, gateId: string, name: string) => void;
+  setGateColor: (sampleId: string, gateId: string, color: string | null) => void;
   deleteGate: (sampleId: string, gateId: string) => void;
 
   applyGatingStrategy: (sourceSampleId: string, targetSampleIds: string[]) => void;
@@ -221,6 +234,18 @@ export const useStore = create<AppState>((set, get) => ({
       })),
     })),
 
+  resizePanel: (sampleId, panelId, width, height) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => ({
+        ...s,
+        panels: s.panels.map((p) =>
+          p.id === panelId
+            ? { ...p, width: Math.max(MIN_PANEL_WIDTH, width), height: Math.max(MIN_PANEL_HEIGHT, height) }
+            : p
+        ),
+      })),
+    })),
+
   removePanel: (sampleId, panelId) =>
     set((state) => ({
       samples: updateSample(state.samples, sampleId, (s) => {
@@ -265,6 +290,8 @@ export const useStore = create<AppState>((set, get) => ({
           yLogScale: false,
           x: pos.x,
           y: pos.y,
+          width: DEFAULT_PANEL_WIDTH,
+          height: DEFAULT_PANEL_HEIGHT,
         };
         resultId = panel.id;
         return { ...s, panels: [...s.panels, panel] };
@@ -350,6 +377,14 @@ export const useStore = create<AppState>((set, get) => ({
       samples: updateSample(state.samples, sampleId, (s) => ({
         ...s,
         gates: { ...s.gates, [gateId]: { ...s.gates[gateId], name } },
+      })),
+    })),
+
+  setGateColor: (sampleId, gateId, color) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => ({
+        ...s,
+        gates: { ...s.gates, [gateId]: { ...s.gates[gateId], color: color ?? undefined } },
       })),
     })),
 

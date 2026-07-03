@@ -42,7 +42,14 @@ export function cloneGateTree(
       const newId = makeId('gate');
       const newParentId = idMap.get(sourceId) ?? ROOT_GATE_ID;
       idMap.set(childId, newId);
-      gates[newId] = { id: newId, name: child.name, parentId: newParentId, shape: child.shape, childIds: [] };
+      gates[newId] = {
+        id: newId,
+        name: child.name,
+        parentId: newParentId,
+        shape: child.shape,
+        childIds: [],
+        color: child.color,
+      };
       gates[newParentId] = { ...gates[newParentId], childIds: [...gates[newParentId].childIds, newId] };
       visit(childId, path);
     }

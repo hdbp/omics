@@ -19,3 +19,13 @@ export function densityColor(t: number): string {
   const b = Math.round(b1 + (b2 - b1) * frac);
   return `rgb(${r},${g},${b})`;
 }
+
+/** Converts a "#rrggbb" hex color into an rgba() string with the given alpha. */
+export function hexToRgba(hex: string, alpha: number): string {
+  const match = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!match) return `rgba(46, 230, 166, ${alpha})`;
+  const r = parseInt(match[1], 16);
+  const g = parseInt(match[2], 16);
+  const b = parseInt(match[3], 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}

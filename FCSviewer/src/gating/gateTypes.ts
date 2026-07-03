@@ -53,6 +53,8 @@ export interface GateNode {
   parentId: string | null;
   shape: GateShape | null; // null only for the synthetic root "All Events" node
   childIds: string[];
+  /** User-assigned color (hex). Undefined means "use the default look" (density pseudocolor / green outline). */
+  color?: string;
 }
 
 export const ROOT_GATE_ID = 'root';
