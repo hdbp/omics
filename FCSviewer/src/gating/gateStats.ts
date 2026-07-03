@@ -2,7 +2,7 @@ import type { Sample, StatsFieldKey } from '../state/types';
 import { getColumn } from '../state/types';
 import { getGateEventIndices, ancestorChain } from './gateEval';
 import { ROOT_GATE_ID } from './gateTypes';
-import type { GateNode } from './gateTypes';
+import type { GateNode, QuadrantId } from './gateTypes';
 
 export interface GateStat {
   gateId: string;
@@ -106,6 +106,48 @@ export function computeLayoutItemStats(
     medianX: medianForParam(sample, indices, xParam),
     medianY: plotType === 'scatter' ? medianForParam(sample, indices, yParam) : NaN,
   };
+}
+
+export interface QuadrantStat {
+  count: number;
+  percentParent: number;
+  percentTotal: number;
+}
+
+export interface QuadrantGroupInfo {
+  x: number;
+  y: number;
+  labels: Partial<Record<QuadrantId, string>>;
+  colors: Partial<Record<QuadrantId, string>>;
+  stats: Partial<Record<QuadrantId, QuadrantStat>>;
+}
+
+/**
+ * Groups a gate's quadrant-shaped children by crosshair placement (groupId), with each
+ * quadrant's name/color plus its own count/%parent/%total — shared by the live panel
+ * canvases (GatePanel, LayoutPanel) and the PNG export renderer so quadrant stats always
+ * match the statistics table.
+ */
+export function collectQuadrantGroups(
+  sample: Sample,
+  gateNode: GateNode | undefined,
+  xParam: string,
+  yParam: string
+): Map<string, QuadrantGroupInfo> {
+  const groups = new Map<string, QuadrantGroupInfo>();
+  for (const childId of gateNode?.childIds ?? []) {
+    const child = sample.gates[childId];
+    const shape = child?.shape;
+    if (shape?.kind !== 'quadrant' || shape.xParam !== xParam || shape.yParam !== yParam) continue;
+    const group = groups.get(shape.groupId) ?? { x: shape.x, y: shape.y, labels: {}, colors: {}, stats: {} };
+    group.labels[shape.quadrant] = child.name;
+    if (child.color) group.colors[shape.quadrant] = child.color;
+    const indices = getGateEventIndices(sample, childId);
+    const { percentParent, percentTotal } = gatePercentages(sample, child, indices);
+    group.stats[shape.quadrant] = { count: indices.length, percentParent, percentTotal };
+    groups.set(shape.groupId, group);
+  }
+  return groups;
 }
 
 /** Renders one stats field as display text, matching the live Layout panel and the exported PNG/CSV. */

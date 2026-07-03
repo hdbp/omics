@@ -1,6 +1,6 @@
 import { getColumn, type Sample } from '../state/types';
 import { getGateEventIndices } from '../gating/gateEval';
-import { gatePercentages } from '../gating/gateStats';
+import { gatePercentages, collectQuadrantGroups, type QuadrantStat } from '../gating/gateStats';
 import type { GateNode, GateShape, QuadrantId } from '../gating/gateTypes';
 import { makeScale, toRange, niceTicks, logTicks, dataToPlotValue, type LinearScale } from './scale';
 import { densityColor, hexToRgba } from './colormap';
@@ -8,9 +8,14 @@ import type { PlotTheme } from './theme';
 
 const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
 const QUADRANT_LABEL_OFFSET = 6;
+const QUADRANT_STATS_LINE_HEIGHT = 12;
 const ANNOTATION_PADDING = 6;
 const ANNOTATION_LINE_HEIGHT = 13;
 const DEFAULT_STATS_ANNOTATION = { xFrac: 0.03, yFrac: 0.06 };
+
+function formatQuadrantStats(stat: QuadrantStat): string {
+  return `${stat.count.toLocaleString()} (${stat.percentParent.toFixed(1)}%)`;
+}
 
 function paramRange(sample: Sample, name: string): number {
   return sample.parameters.find((p) => p.name === name)?.range ?? 1;
@@ -206,30 +211,13 @@ export function drawPlotPanel(
   }
   if (plotType === 'scatter') {
     for (const group of collectQuadrantGroups(sample, gateNode, xParam, yParam).values()) {
-      drawQuadrantCrosshair(ctx, xToPx, yToPx, group.x, group.y, group.labels, group.colors, top, plotHeight, left, plotWidth, theme);
+      drawQuadrantCrosshair(ctx, xToPx, yToPx, group.x, group.y, group.labels, group.colors, group.stats, top, plotHeight, left, plotWidth, theme);
     }
   }
 
   ctx.restore();
 
   drawStatsAnnotation(ctx, left, top, plotWidth, plotHeight, spec.statsAnnotation, gateNode, indices, sample, theme);
-}
-
-function collectQuadrantGroups(sample: Sample, gateNode: GateNode | undefined, xParam: string, yParam: string) {
-  const groups = new Map<
-    string,
-    { x: number; y: number; labels: Partial<Record<QuadrantId, string>>; colors: Partial<Record<QuadrantId, string>> }
-  >();
-  for (const childId of gateNode?.childIds ?? []) {
-    const child = sample.gates[childId];
-    const shape = child?.shape;
-    if (shape?.kind !== 'quadrant' || shape.xParam !== xParam || shape.yParam !== yParam) continue;
-    const group = groups.get(shape.groupId) ?? { x: shape.x, y: shape.y, labels: {}, colors: {} };
-    group.labels[shape.quadrant] = child.name;
-    if (child.color) group.colors[shape.quadrant] = child.color;
-    groups.set(shape.groupId, group);
-  }
-  return groups;
 }
 
 function drawShapeOverlay(
@@ -312,6 +300,7 @@ function drawQuadrantCrosshair(
   y: number,
   labels: Partial<Record<QuadrantId, string>>,
   labelColors: Partial<Record<QuadrantId, string>>,
+  stats: Partial<Record<QuadrantId, QuadrantStat>>,
   top: number,
   plotHeight: number,
   left: number,
@@ -333,18 +322,22 @@ function drawQuadrantCrosshair(
   if (labels.UL) {
     ctx.fillStyle = labelColors.UL ?? theme.defaultGateColor;
     ctx.fillText(labels.UL, px - QUADRANT_LABEL_OFFSET, top + 10);
+    if (stats.UL) ctx.fillText(formatQuadrantStats(stats.UL), px - QUADRANT_LABEL_OFFSET, top + 10 + QUADRANT_STATS_LINE_HEIGHT);
   }
   if (labels.LL) {
     ctx.fillStyle = labelColors.LL ?? theme.defaultGateColor;
+    if (stats.LL) ctx.fillText(formatQuadrantStats(stats.LL), px - QUADRANT_LABEL_OFFSET, top + plotHeight - 4 - QUADRANT_STATS_LINE_HEIGHT);
     ctx.fillText(labels.LL, px - QUADRANT_LABEL_OFFSET, top + plotHeight - 4);
   }
   ctx.textAlign = 'left';
   if (labels.UR) {
     ctx.fillStyle = labelColors.UR ?? theme.defaultGateColor;
     ctx.fillText(labels.UR, px + QUADRANT_LABEL_OFFSET, top + 10);
+    if (stats.UR) ctx.fillText(formatQuadrantStats(stats.UR), px + QUADRANT_LABEL_OFFSET, top + 10 + QUADRANT_STATS_LINE_HEIGHT);
   }
   if (labels.LR) {
     ctx.fillStyle = labelColors.LR ?? theme.defaultGateColor;
+    if (stats.LR) ctx.fillText(formatQuadrantStats(stats.LR), px + QUADRANT_LABEL_OFFSET, top + plotHeight - 4 - QUADRANT_STATS_LINE_HEIGHT);
     ctx.fillText(labels.LR, px + QUADRANT_LABEL_OFFSET, top + plotHeight - 4);
   }
 }

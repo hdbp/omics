@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { getColumn, type Sample, type Panel } from '../state/types';
 import { ancestorChain, getGateEventIndices, shapeContainsPoint } from '../gating/gateEval';
-import { gatePercentages } from '../gating/gateStats';
+import { gatePercentages, collectQuadrantGroups, type QuadrantStat } from '../gating/gateStats';
 import { ROOT_GATE_ID } from '../gating/gateTypes';
 import type { GateShape, Point, QuadrantId } from '../gating/gateTypes';
 import {
@@ -23,6 +23,11 @@ type Mode = 'none' | 'rectangle' | 'polygon' | 'range' | 'quadrant';
 const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
 const CLOSE_RADIUS_PX = 9;
 const QUADRANT_LABEL_OFFSET = 6;
+const QUADRANT_STATS_LINE_HEIGHT = 12;
+
+function formatQuadrantStats(stat: QuadrantStat): string {
+  return `${stat.count.toLocaleString()} (${stat.percentParent.toFixed(1)}%)`;
+}
 const DEFAULT_GATE_COLOR = '#2ee6a6';
 const DEFAULT_HISTOGRAM_COLOR = '#4f8dff';
 const SHAPE_MOVE_THRESHOLD_PX = 3;
@@ -215,23 +220,12 @@ export function GatePanel({
     setDrawing(false);
   }, [panel.xParam, panel.yParam, panel.plotType, xLog, yLog]);
 
-  // Distinct quadrant-gate groups (crosshair placements) among this panel's own child gates.
-  const quadrantGroups = useMemo(() => {
-    const groups = new Map<
-      string,
-      { x: number; y: number; labels: Partial<Record<QuadrantId, string>>; colors: Partial<Record<QuadrantId, string>> }
-    >();
-    for (const childId of gateNode?.childIds ?? []) {
-      const child = sample.gates[childId];
-      const shape = child?.shape;
-      if (shape?.kind !== 'quadrant' || shape.xParam !== panel.xParam || shape.yParam !== panel.yParam) continue;
-      const group = groups.get(shape.groupId) ?? { x: shape.x, y: shape.y, labels: {}, colors: {} };
-      group.labels[shape.quadrant] = child.name;
-      if (child.color) group.colors[shape.quadrant] = child.color;
-      groups.set(shape.groupId, group);
-    }
-    return groups;
-  }, [sample.gates, gateNode, panel.xParam, panel.yParam]);
+  // Distinct quadrant-gate groups (crosshair placements) among this panel's own child gates,
+  // each carrying its own count/%parent/%total alongside the name/color.
+  const quadrantGroups = useMemo(
+    () => collectQuadrantGroups(sample, gateNode, panel.xParam, panel.yParam),
+    [sample, gateNode, panel.xParam, panel.yParam]
+  );
 
   const indices = useMemo(() => getGateEventIndices(sample, panel.gateId), [sample, panel.gateId]);
   const { percentParent, percentTotal } = useMemo(
@@ -432,12 +426,12 @@ export function GatePanel({
 
     if (panel.plotType === 'scatter') {
       for (const group of quadrantGroups.values()) {
-        drawQuadrantCrosshair(ctx, xToPx, yToPx, group.x, group.y, group.labels, group.colors, false);
+        drawQuadrantCrosshair(ctx, xToPx, yToPx, group.x, group.y, group.labels, group.colors, group.stats, false);
       }
     }
 
     if (mode === 'quadrant' && quadrantDraft) {
-      drawQuadrantCrosshair(ctx, xToPx, yToPx, quadrantDraft.x, quadrantDraft.y, null, null, true);
+      drawQuadrantCrosshair(ctx, xToPx, yToPx, quadrantDraft.x, quadrantDraft.y, null, null, null, true);
     }
 
     if (mode === 'rectangle' && rectDraft) {
@@ -602,6 +596,7 @@ export function GatePanel({
     y: number,
     labels: Partial<Record<QuadrantId, string>> | null,
     labelColors: Partial<Record<QuadrantId, string>> | null,
+    stats: Partial<Record<QuadrantId, QuadrantStat>> | null,
     isDraft: boolean
   ) {
     const px = xPx(x);
@@ -622,18 +617,22 @@ export function GatePanel({
       if (labels.UL) {
         ctx.fillStyle = labelColors?.UL ?? DEFAULT_GATE_COLOR;
         ctx.fillText(labels.UL, px - QUADRANT_LABEL_OFFSET, MARGIN.top + 10);
+        if (stats?.UL) ctx.fillText(formatQuadrantStats(stats.UL), px - QUADRANT_LABEL_OFFSET, MARGIN.top + 10 + QUADRANT_STATS_LINE_HEIGHT);
       }
       if (labels.LL) {
         ctx.fillStyle = labelColors?.LL ?? DEFAULT_GATE_COLOR;
+        if (stats?.LL) ctx.fillText(formatQuadrantStats(stats.LL), px - QUADRANT_LABEL_OFFSET, MARGIN.top + plotHeight - 4 - QUADRANT_STATS_LINE_HEIGHT);
         ctx.fillText(labels.LL, px - QUADRANT_LABEL_OFFSET, MARGIN.top + plotHeight - 4);
       }
       ctx.textAlign = 'left';
       if (labels.UR) {
         ctx.fillStyle = labelColors?.UR ?? DEFAULT_GATE_COLOR;
         ctx.fillText(labels.UR, px + QUADRANT_LABEL_OFFSET, MARGIN.top + 10);
+        if (stats?.UR) ctx.fillText(formatQuadrantStats(stats.UR), px + QUADRANT_LABEL_OFFSET, MARGIN.top + 10 + QUADRANT_STATS_LINE_HEIGHT);
       }
       if (labels.LR) {
         ctx.fillStyle = labelColors?.LR ?? DEFAULT_GATE_COLOR;
+        if (stats?.LR) ctx.fillText(formatQuadrantStats(stats.LR), px + QUADRANT_LABEL_OFFSET, MARGIN.top + plotHeight - 4 - QUADRANT_STATS_LINE_HEIGHT);
         ctx.fillText(labels.LR, px + QUADRANT_LABEL_OFFSET, MARGIN.top + plotHeight - 4);
       }
     }
