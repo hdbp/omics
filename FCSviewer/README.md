@@ -1,6 +1,6 @@
 # FCS Viewer
 
-A lightweight, standalone, in-browser viewer for flow cytometry `.fcs` files that mimics FlowJo's core workflow: load data, build a layout of linked plots by drilling into gates, and view live statistics. It's a static React/TypeScript single-page app — there is no backend, and files never leave the browser.
+A lightweight, standalone viewer for flow cytometry `.fcs` files that mimics FlowJo's core workflow: load data, build a layout of linked plots by drilling into gates, and view live statistics. It's a static React/TypeScript single-page app — there is no backend, and files never leave the browser. Ships as a portable browser build and as a native macOS/Linux desktop app (see "Running it" below) — both built from the same source.
 
 ## Features
 
@@ -32,12 +32,33 @@ npm install
 npm run dev
 ```
 
-Then open the printed local URL. To produce a static production build (deployable to any static file host, e.g. GitHub Pages or S3):
+Then open the printed local URL.
+
+FCS Viewer ships in two forms, built from the exact same source:
+
+### 1. Portable (runs in any browser)
+
+A static production build — no install, just open it, works on macOS, Linux, Windows, or served from any static host:
 
 ```bash
-npm run build   # outputs to dist/
-npm run preview # serve the production build locally
+npm run build     # outputs to dist/
+npm run preview   # serve the production build locally to try it
 ```
+
+`dist/` is a self-contained set of static files (HTML/JS/CSS) — copy that folder anywhere (a USB drive, an internal file share, GitHub Pages, S3, etc.) and open `index.html` in a browser, or serve it with any static file server.
+
+### 2. Native desktop app (macOS `.dmg`, Linux `.deb`/`.AppImage`)
+
+The same web app wrapped by [Tauri](https://tauri.app) into a real installable app — a dock icon, its own window (no browser chrome), and no `npm install`/terminal needed for end users. It uses each OS's built-in system webview (WebKit on macOS, WebKitGTK on Linux), so the installer is a few MB of Rust glue on top of the ~80KB app bundle, not a bundled browser engine.
+
+```bash
+npm run desktop:dev     # run it as a desktop window during development
+npm run desktop:build   # build the installer(s) for the OS you're running on
+```
+
+`desktop:build` only produces installers for the platform it runs *on* (there's no cross-compiling a `.dmg` from Linux or vice versa) — run it on a Mac for the `.dmg`/`.app`, or on Linux for the `.deb`/`.AppImage`. The `src-tauri/` folder holds the wrapper config; the actual app code is 100% the same `src/` used by the portable build, and it doesn't need any Tauri-specific APIs since file loading already goes through the browser's own File API.
+
+**Building both without owning a Mac:** push a tag like `fcsviewer-v0.1.0`, or run the **FCS Viewer desktop build** workflow manually from the Actions tab — `.github/workflows/fcsviewer-desktop.yml` builds the macOS (universal, Intel + Apple Silicon) `.dmg` and the Linux `.deb`/`.AppImage` in parallel on GitHub's own macOS/Linux runners and uploads them as workflow artifacts (and as a draft GitHub Release when triggered by the tag). The macOS build isn't code-signed/notarized (no Apple Developer account configured), so first launch will need a right-click → **Open** to bypass Gatekeeper's "unidentified developer" warning.
 
 ## Usage
 
@@ -98,10 +119,18 @@ src/
     ├── theme.ts            Light/dark color palettes for PNG export
     ├── plotRender.ts       Re-renders a panel's plot onto an export canvas in either theme, independent of the live (always-dark) DOM canvas
     └── id.ts               Shared unique-id generator
+
+src-tauri/                  Native desktop wrapper (Tauri) — config + a few lines of Rust; loads dist/ into an OS webview
+├── tauri.conf.json         Window size, bundle targets (dmg/app/deb/appimage), icons, product metadata
+├── Cargo.toml / src/       Minimal Rust entry point — no custom commands; the app doesn't need any Tauri-specific APIs
+└── icons/                  App icons (currently the Tauri defaults — swap in real artwork before a real release)
 ```
+
+`.github/workflows/fcsviewer-desktop.yml` builds the desktop installers in CI (see "Native desktop app" above).
 
 ## Known limitations
 
 - There's no shared "workspace" gating tree that stays synchronized across samples — "Apply to other samples" is a one-time copy (of both gates and panel layout); editing gates afterward on one sample doesn't propagate to the others.
 - No compensation (spillover matrix). The log axis option is a plain log10 transform floored at 1, not FlowJo's logicle/biexponential.
 - Very large files (multi-million events) parse and render on the main thread, so the UI may pause briefly while loading.
+- The desktop build isn't code-signed or notarized (no Apple Developer account configured) and uses placeholder icons — fine for internal/personal use, but a real release would want both before wide distribution.

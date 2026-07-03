@@ -1,0 +1,93 @@
+name: FCS Viewer desktop build
+
+# Builds the native desktop wrapper (Tauri) for FCS Viewer: a macOS .dmg
+# (universal, Intel + Apple Silicon) and Linux .deb/.AppImage packages.
+# The portable browser build (`npm run build` in FCSviewer/) is unaffected
+# by this workflow and needs no packaging step of its own.
+on:
+  push:
+    tags:
+      - "fcsviewer-v*"
+  workflow_dispatch: {}
+
+defaults:
+  run:
+    working-directory: FCSviewer
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+          - platform: ubuntu-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux bundling dependencies
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: FCSviewer/src-tauri -> target
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: FCSviewer/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build the desktop app
+        id: tauri-build
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: FCSviewer
+          args: ${{ matrix.args }}
+          # Only create/update a GitHub Release when triggered by a fcsviewer-v* tag push;
+          # a manual workflow_dispatch run just builds and uploads artifacts below.
+          tagName: ${{ startsWith(github.ref, 'refs/tags/fcsviewer-v') && github.ref_name || '' }}
+          releaseName: "FCS Viewer ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+
+      # Bundle output lands under target/release/bundle/ normally, or
+      # target/<triple>/release/bundle/ when --target was passed (macOS universal build).
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fcsviewer-${{ matrix.platform }}
+          path: |
+            FCSviewer/src-tauri/target/release/bundle/dmg/*.dmg
+            FCSviewer/src-tauri/target/release/bundle/macos/*.app
+            FCSviewer/src-tauri/target/release/bundle/deb/*.deb
+            FCSviewer/src-tauri/target/release/bundle/appimage/*.AppImage
+            FCSviewer/src-tauri/target/*/release/bundle/dmg/*.dmg
+            FCSviewer/src-tauri/target/*/release/bundle/macos/*.app
+          if-no-files-found: warn
