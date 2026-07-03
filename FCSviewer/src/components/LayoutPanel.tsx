@@ -31,8 +31,6 @@ interface Props {
   isSelected: boolean;
   onDragHandleDown: (e: React.MouseEvent) => void;
   onResizeHandleDown: (e: React.MouseEvent) => void;
-  onRegisterCanvas: (itemId: string, el: HTMLCanvasElement | null) => void;
-  onRegisterRoot: (itemId: string, el: HTMLDivElement | null) => void;
 }
 
 /**
@@ -48,8 +46,6 @@ export function LayoutPanel({
   isSelected,
   onDragHandleDown,
   onResizeHandleDown,
-  onRegisterCanvas,
-  onRegisterRoot,
 }: Props) {
   const {
     updateLayoutItemAxis,
@@ -102,16 +98,6 @@ export function LayoutPanel({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-
-  useEffect(() => {
-    onRegisterCanvas(item.id, canvasRef.current);
-    onRegisterRoot(item.id, rootRef.current);
-    return () => {
-      onRegisterCanvas(item.id, null);
-      onRegisterRoot(item.id, null);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.id]);
 
   const indices = useMemo(() => (sample ? getGateEventIndices(sample, item.gateId) : new Uint32Array(0)), [sample, item.gateId]);
   const itemStats = useMemo(

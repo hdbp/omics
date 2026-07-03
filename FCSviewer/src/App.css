@@ -303,6 +303,14 @@
   margin-left: 4px;
   border-left: 1px solid #2e303a;
 }
+.export-theme-group {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding-left: 8px;
+  margin-left: 4px;
+  border-left: 1px solid #2e303a;
+}
 .gate-panel-header {
   display: flex;
   align-items: center;

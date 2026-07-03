@@ -6,10 +6,14 @@ import { LayoutPanel } from './LayoutPanel';
 import { PADDING, MIN_PANEL_WIDTH, MIN_PANEL_HEIGHT } from '../state/panelLayout';
 import { downloadCanvasAsPng, truncateText } from '../utils/exportImage';
 import { downloadCsv } from '../utils/csv';
+import { drawPlotPanel } from '../utils/plotRender';
+import { getExportTheme, type ExportThemeName } from '../utils/theme';
 import { DEFAULT_STATS_FIELDS, STATS_FIELD_LABELS, type LayoutItem } from '../state/types';
 
 const SNAP_THRESHOLD = 6;
 const MOVE_THRESHOLD = 3;
+const EXPORT_HEADER_HEIGHT = 42;
+const EXPORT_STATS_LINE_HEIGHT = 20;
 
 interface DragState {
   itemId: string;
@@ -90,12 +94,11 @@ function computeSnappedPosition(
 export function LayoutWorkspace() {
   const { samples, layoutItems, moveLayoutItem, resizeLayoutItem, autoArrangeLayout, focusedLayoutItemId, focusLayoutItem } =
     useStore();
-  const canvasRefs = useRef(new Map<string, HTMLCanvasElement>());
-  const rootRefs = useRef(new Map<string, HTMLDivElement>());
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [guides, setGuides] = useState<Guides>({});
+  const [exportTheme, setExportTheme] = useState<ExportThemeName>('light');
   const movedRef = useRef(false);
 
   useEffect(() => {
@@ -230,6 +233,7 @@ export function LayoutWorkspace() {
 
   function exportLayout() {
     if (layoutItems.length === 0) return;
+    const theme = getExportTheme(exportTheme);
     const scale = 2;
     const out = document.createElement('canvas');
     out.width = contentSize.width * scale;
@@ -237,14 +241,14 @@ export function LayoutWorkspace() {
     const ctx = out.getContext('2d');
     if (!ctx) return;
     ctx.scale(scale, scale);
-    ctx.fillStyle = '#16171d';
+    ctx.fillStyle = theme.pageBg;
     ctx.fillRect(0, 0, contentSize.width, contentSize.height);
 
     for (const item of layoutItems) {
       const sample = samples.find((s) => s.id === item.sampleId);
 
-      ctx.fillStyle = '#1a1b22';
-      ctx.strokeStyle = '#2e303a';
+      ctx.fillStyle = theme.panelBg;
+      ctx.strokeStyle = theme.panelBorder;
       ctx.lineWidth = 1;
       if (typeof ctx.roundRect === 'function') {
         ctx.beginPath();
@@ -261,29 +265,33 @@ export function LayoutWorkspace() {
             .map((n) => n.name)
             .join(' › ')}`
         : 'Source sample removed';
-      ctx.fillStyle = '#e5e7eb';
+      ctx.fillStyle = theme.titleText;
       ctx.font = 'bold 13px system-ui, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(truncateText(item.label, 40), item.x + 12, item.y + 22);
-      ctx.fillStyle = '#8b93a1';
+      ctx.fillStyle = theme.subtitleText;
       ctx.font = '10px system-ui, sans-serif';
       ctx.fillText(truncateText(pathStr, 52), item.x + 12, item.y + 36);
 
-      const canvasEl = canvasRefs.current.get(item.id);
-      const rootEl = rootRefs.current.get(item.id);
-      if (canvasEl && rootEl) {
-        const rootRect = rootEl.getBoundingClientRect();
-        const canvasRect = canvasEl.getBoundingClientRect();
-        const offX = canvasRect.left - rootRect.left;
-        const offY = canvasRect.top - rootRect.top;
-        ctx.drawImage(canvasEl, item.x + offX, item.y + offY, canvasRect.width, canvasRect.height);
+      const statsFields = item.statsFields ?? DEFAULT_STATS_FIELDS;
+      const showStats = !!sample && statsFields.length > 0;
+      const footerHeight = showStats ? EXPORT_STATS_LINE_HEIGHT : 0;
+      if (sample) {
+        drawPlotPanel(
+          ctx,
+          item.x,
+          item.y + EXPORT_HEADER_HEIGHT,
+          item.width,
+          item.height - EXPORT_HEADER_HEIGHT - footerHeight,
+          { sample, ...item },
+          theme
+        );
       }
 
-      const statsFields = item.statsFields ?? DEFAULT_STATS_FIELDS;
-      if (sample && statsFields.length > 0) {
+      if (sample && showStats) {
         const stats = computeLayoutItemStats(sample, item.gateId, item.xParam, item.yParam, item.plotType);
         const text = statsFields.map((k) => `${STATS_FIELD_LABELS[k]}: ${formatStatsField(k, stats, item.plotType)}`).join('   ·   ');
-        ctx.fillStyle = '#9aa4b2';
+        ctx.fillStyle = theme.statsValueText;
         ctx.font = '9px system-ui, sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText(truncateText(text, Math.floor(item.width / 4.2)), item.x + 12, item.y + item.height - 8);
@@ -333,6 +341,16 @@ export function LayoutWorkspace() {
           <button className="btn" onClick={exportStats} disabled={layoutItems.length === 0}>
             Export stats CSV
           </button>
+        </div>
+        <div className="export-theme-group" title="Background for the exported PNG">
+          <button className={`btn btn-small ${exportTheme === 'light' ? 'btn-active' : ''}`} onClick={() => setExportTheme('light')}>
+            Light bg
+          </button>
+          <button className={`btn btn-small ${exportTheme === 'dark' ? 'btn-active' : ''}`} onClick={() => setExportTheme('dark')}>
+            Dark bg
+          </button>
+        </div>
+        <div className="btn-group">
           <button className="btn btn-primary" onClick={exportLayout} disabled={layoutItems.length === 0}>
             Export layout as PNG
           </button>
@@ -433,14 +451,6 @@ export function LayoutWorkspace() {
                     origWidth: item.width,
                     origHeight: item.height,
                   });
-                }}
-                onRegisterCanvas={(id, el) => {
-                  if (el) canvasRefs.current.set(id, el);
-                  else canvasRefs.current.delete(id);
-                }}
-                onRegisterRoot={(id, el) => {
-                  if (el) rootRefs.current.set(id, el);
-                  else rootRefs.current.delete(id);
                 }}
               />
             ))}

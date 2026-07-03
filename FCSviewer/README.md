@@ -20,6 +20,7 @@ A lightweight, standalone, in-browser viewer for flow cytometry `.fcs` files tha
 - **Layout alignment helpers** — click a panel's header in the Layout to select it, shift-click to add more to the selection; a toolbar appears to align the selection's edges or centers (**Left/Right/Top/Bottom/Ctr X/Ctr Y**) or **Dist X/Dist Y** to space 3+ selected panels evenly. Dragging any panel also snaps to nearby panels' edges/centers (within a few pixels) and shows a dashed guide line while it's snapped. Click empty canvas space to clear the selection.
 - **Layout population statistics export** — **Export stats CSV** in the Layout toolbar writes one row per panel in the collage: sample, population path, event count, % of parent, % of total, and median of each axis parameter (using its custom label if set) — everything you need to caption a figure with real numbers.
 - **Choose which stats print under each Layout panel** — click **Stats ▾** on a Layout panel to pick which fields (population path, count, % parent, % total, median X, median Y) appear as a text line under its plot. Baked into **Export layout as PNG** too, so the exported figure carries the numbers, not just the plot.
+- **Light or dark background on export** — the app's own UI is always dark, but **Export layout as PNG** (in both a sample's workspace and the Layout) has a **Light bg / Dark bg** toggle next to it. Light re-renders the whole figure — panel chrome, axes, ticks, gate outlines, the stats badge — in publication-friendly colors (white background, dark text) instead of a screenshot of the dark UI; the density colormap and any custom gate colors are unchanged either way.
 
 Not included in this version: compensation/spillover matrices and full biexponential/logicle transforms — the log option is a straight log10 (floored at 1), not FlowJo's logicle.
 
@@ -59,6 +60,7 @@ npm run preview # serve the production build locally
 14. In the Layout, click a panel's header to select it and shift-click others to multi-select; use the **Left/Right/Top/Bottom/Ctr X/Ctr Y** buttons that appear to align the selection, or **Dist X/Dist Y** (3+ panels) to space them evenly. Dragging a panel also snaps to its neighbors' edges/centers automatically. Click **Auto-arrange** for a clean grid, **Export stats CSV** for a per-panel table of counts/%/medians, or **Export layout as PNG** for a publish-ready image.
 15. Every panel shows a small **%parent/%total badge** on its plot — drag it (by clicking directly on the badge) to wherever it won't sit on top of your data; this is separate from dragging the panel itself, which only happens from the header.
 16. On a Layout panel, click **Stats ▾** to check/uncheck which fields (population path, count, %parent, %total, median X, median Y) show as a line of text under the plot — and in the exported PNG.
+17. Before exporting a PNG (sample workspace or Layout), pick **Light bg** or **Dark bg** next to the export button — Light re-renders the whole figure in white/dark-text for a publication-ready image, independent of the app's own (always-dark) interface.
 
 ## Project layout
 
@@ -80,10 +82,10 @@ src/
 │   ├── FileLoader.tsx      Drag-and-drop / file picker
 │   ├── SampleList.tsx      Loaded-sample switcher
 │   ├── GateTree.tsx        Gating hierarchy sidebar + "apply to other samples" trigger
-│   ├── PanelWorkspace.tsx  The scrollable multi-panel canvas: layout, connector lines, drag/resize, PNG export
+│   ├── PanelWorkspace.tsx  The scrollable multi-panel canvas: layout, connector lines, drag/resize, light/dark PNG export
 │   ├── GatePanel.tsx       A single plot panel: axes, custom axis labels, log toggle, gate drawing/editing/coloring, inline rename, drill-down-to-new-panel
 │   ├── LayoutSidebar.tsx   Sidebar section listing Layout items + the samples/layout view switcher
-│   ├── LayoutWorkspace.tsx The Layout collage canvas: grid arrangement, drag/resize, multi-select + align/distribute + snap guides, stats CSV + PNG export
+│   ├── LayoutWorkspace.tsx The Layout collage canvas: grid arrangement, drag/resize, multi-select + align/distribute + snap guides, stats CSV + light/dark PNG export
 │   ├── LayoutPanel.tsx     A read-only-for-gating plot in the Layout (editable axes/custom axis labels/log/label/position/size)
 │   ├── StatsTable.tsx      Whole-sample statistics table + CSV export
 │   ├── GateNameDialog.tsx  Small modal for naming a new gate
@@ -93,6 +95,8 @@ src/
     ├── colormap.ts        Pseudocolor density gradient
     ├── csv.ts             CSV download helper
     ├── exportImage.ts     PNG layout export helper
+    ├── theme.ts            Light/dark color palettes for PNG export
+    ├── plotRender.ts       Re-renders a panel's plot onto an export canvas in either theme, independent of the live (always-dark) DOM canvas
     └── id.ts               Shared unique-id generator
 ```
 

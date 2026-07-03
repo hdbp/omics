@@ -116,8 +116,6 @@ interface Props {
   isFocused: boolean;
   onDragHandleDown: (e: React.MouseEvent) => void;
   onResizeHandleDown: (e: React.MouseEvent) => void;
-  onRegisterCanvas: (panelId: string, el: HTMLCanvasElement | null) => void;
-  onRegisterRoot: (panelId: string, el: HTMLDivElement | null) => void;
 }
 
 export function GatePanel({
@@ -126,8 +124,6 @@ export function GatePanel({
   isFocused,
   onDragHandleDown,
   onResizeHandleDown,
-  onRegisterCanvas,
-  onRegisterRoot,
 }: Props) {
   const {
     updatePanelAxis,
@@ -186,16 +182,6 @@ export function GatePanel({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-
-  useEffect(() => {
-    onRegisterCanvas(panel.id, canvasRef.current);
-    onRegisterRoot(panel.id, rootRef.current);
-    return () => {
-      onRegisterCanvas(panel.id, null);
-      onRegisterRoot(panel.id, null);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panel.id]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {

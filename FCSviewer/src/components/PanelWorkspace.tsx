@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../state/store';
 import type { Sample } from '../state/types';
 import { ancestorChain } from '../gating/gateEval';
 import { GatePanel } from './GatePanel';
 import { PADDING, MIN_PANEL_WIDTH, MIN_PANEL_HEIGHT } from '../state/panelLayout';
 import { downloadCanvasAsPng, truncateText } from '../utils/exportImage';
+import { drawPlotPanel } from '../utils/plotRender';
+import { getExportTheme, type ExportThemeName } from '../utils/theme';
+
+const EXPORT_HEADER_HEIGHT = 42;
 
 interface DragState {
   panelId: string;
@@ -24,10 +28,9 @@ interface ResizeState {
 
 export function PanelWorkspace({ sample }: { sample: Sample }) {
   const { movePanel, resizePanel, autoArrangePanels, focusedPanelId, focusPanel } = useStore();
-  const canvasRefs = useRef(new Map<string, HTMLCanvasElement>());
-  const rootRefs = useRef(new Map<string, HTMLDivElement>());
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
+  const [exportTheme, setExportTheme] = useState<ExportThemeName>('light');
 
   useEffect(() => {
     if (!focusedPanelId) return;
@@ -104,6 +107,7 @@ export function PanelWorkspace({ sample }: { sample: Sample }) {
   function exportLayout() {
     const panels = sample.panels;
     if (panels.length === 0) return;
+    const theme = getExportTheme(exportTheme);
     const scale = 2;
     const out = document.createElement('canvas');
     out.width = contentSize.width * scale;
@@ -111,10 +115,10 @@ export function PanelWorkspace({ sample }: { sample: Sample }) {
     const ctx = out.getContext('2d');
     if (!ctx) return;
     ctx.scale(scale, scale);
-    ctx.fillStyle = '#16171d';
+    ctx.fillStyle = theme.pageBg;
     ctx.fillRect(0, 0, contentSize.width, contentSize.height);
 
-    ctx.strokeStyle = '#4b5160';
+    ctx.strokeStyle = theme.connectorStroke;
     ctx.lineWidth = 1.5;
     for (const line of connectors) {
       ctx.beginPath();
@@ -124,8 +128,8 @@ export function PanelWorkspace({ sample }: { sample: Sample }) {
     }
 
     for (const p of panels) {
-      ctx.fillStyle = '#1a1b22';
-      ctx.strokeStyle = '#2e303a';
+      ctx.fillStyle = theme.panelBg;
+      ctx.strokeStyle = theme.panelBorder;
       ctx.lineWidth = 1;
       if (typeof ctx.roundRect === 'function') {
         ctx.beginPath();
@@ -141,23 +145,15 @@ export function PanelWorkspace({ sample }: { sample: Sample }) {
       const pathStr = ancestorChain(sample.gates, p.gateId)
         .map((n) => n.name)
         .join(' › ');
-      ctx.fillStyle = '#e5e7eb';
+      ctx.fillStyle = theme.titleText;
       ctx.font = 'bold 13px system-ui, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(truncateText(gateName, 40), p.x + 12, p.y + 22);
-      ctx.fillStyle = '#8b93a1';
+      ctx.fillStyle = theme.subtitleText;
       ctx.font = '10px system-ui, sans-serif';
       ctx.fillText(truncateText(pathStr, 48), p.x + 12, p.y + 36);
 
-      const canvasEl = canvasRefs.current.get(p.id);
-      const rootEl = rootRefs.current.get(p.id);
-      if (canvasEl && rootEl) {
-        const rootRect = rootEl.getBoundingClientRect();
-        const canvasRect = canvasEl.getBoundingClientRect();
-        const offX = canvasRect.left - rootRect.left;
-        const offY = canvasRect.top - rootRect.top;
-        ctx.drawImage(canvasEl, p.x + offX, p.y + offY, canvasRect.width, canvasRect.height);
-      }
+      drawPlotPanel(ctx, p.x, p.y + EXPORT_HEADER_HEIGHT, p.width, p.height - EXPORT_HEADER_HEIGHT, { sample, ...p }, theme);
     }
 
     downloadCanvasAsPng(out, `${sample.fileName.replace(/\.fcs$/i, '')}_gating_layout.png`);
@@ -173,6 +169,16 @@ export function PanelWorkspace({ sample }: { sample: Sample }) {
           <button className="btn" onClick={() => autoArrangePanels(sample.id)}>
             Auto-arrange
           </button>
+        </div>
+        <div className="export-theme-group" title="Background for the exported PNG">
+          <button className={`btn btn-small ${exportTheme === 'light' ? 'btn-active' : ''}`} onClick={() => setExportTheme('light')}>
+            Light bg
+          </button>
+          <button className={`btn btn-small ${exportTheme === 'dark' ? 'btn-active' : ''}`} onClick={() => setExportTheme('dark')}>
+            Dark bg
+          </button>
+        </div>
+        <div className="btn-group">
           <button className="btn btn-primary" onClick={exportLayout}>
             Export layout as PNG
           </button>
@@ -210,14 +216,6 @@ export function PanelWorkspace({ sample }: { sample: Sample }) {
                   origWidth: panel.width,
                   origHeight: panel.height,
                 });
-              }}
-              onRegisterCanvas={(id, el) => {
-                if (el) canvasRefs.current.set(id, el);
-                else canvasRefs.current.delete(id);
-              }}
-              onRegisterRoot={(id, el) => {
-                if (el) rootRefs.current.set(id, el);
-                else rootRefs.current.delete(id);
               }}
             />
           ))}
