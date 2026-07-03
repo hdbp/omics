@@ -15,10 +15,17 @@ import {
   plotValueToData,
   type LinearScale,
 } from '../utils/scale';
-import { densityColor, hexToRgba } from '../utils/colormap';
+import { densityColor, hexToRgba, COLORMAP_IDS, COLORMAP_LABELS, DEFAULT_COLORMAP, type ColormapId } from '../utils/colormap';
+import { FONT_FAMILY_OPTIONS, MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_FONT_SIZE, resolvePanelFont } from '../utils/fonts';
+import { marchingSquares, findLoopContainingPoint } from '../gating/contour';
 import { GateNameDialog } from './GateNameDialog';
 
-type Mode = 'none' | 'rectangle' | 'polygon' | 'range' | 'quadrant';
+type Mode = 'none' | 'rectangle' | 'polygon' | 'range' | 'quadrant' | 'contour';
+
+const DEFAULT_CONTOUR_THRESHOLD_PCT = 20;
+const MIN_CONTOUR_THRESHOLD_PCT = 2;
+const MAX_CONTOUR_THRESHOLD_PCT = 90;
+const CONTOUR_THRESHOLD_STEP_PCT = 2;
 
 const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
 const CLOSE_RADIUS_PX = 9;
@@ -145,6 +152,8 @@ export function GatePanel({
     updateGateShape,
     addToLayout,
     updatePanelStatsAnnotationPos,
+    updatePanelColormap,
+    updatePanelFont,
   } = useStore();
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -165,6 +174,9 @@ export function GatePanel({
   const suppressNextClick = useRef(false);
   const [pendingShape, setPendingShape] = useState<GateShape | null>(null);
   const [drawing, setDrawing] = useState(false);
+  const [contourThresholdPct, setContourThresholdPct] = useState(DEFAULT_CONTOUR_THRESHOLD_PCT);
+  const [contourPreviewPoints, setContourPreviewPoints] = useState<Point[] | null>(null);
+  const lastCursorDataRef = useRef<Point | null>(null);
 
   const xLog = panel.xLogScale;
   const yLog = panel.plotType === 'scatter' && panel.yLogScale;
@@ -198,6 +210,7 @@ export function GatePanel({
         setQuadrantDraft(null);
         setPendingShape(null);
         setDrawing(false);
+        setContourPreviewPoints(null);
       }
       if (e.key === 'Enter' && mode === 'polygon' && polyPoints.length >= 3) {
         setPendingShape({ kind: 'polygon', xParam: panel.xParam, yParam: panel.yParam, points: polyPoints });
@@ -218,6 +231,7 @@ export function GatePanel({
     setShapeDrag(null);
     setPendingShape(null);
     setDrawing(false);
+    setContourPreviewPoints(null);
   }, [panel.xParam, panel.yParam, panel.plotType, xLog, yLog]);
 
   // Distinct quadrant-gate groups (crosshair placements) among this panel's own child gates,
@@ -312,7 +326,7 @@ export function GatePanel({
     }
     let maxCount = 1;
     for (let b = 0; b < counts.length; b++) if (counts[b] > maxCount) maxCount = counts[b];
-    return { counts, binOf, maxCount, gridN };
+    return { counts, binOf, maxCount, gridN, xPlotMin, xSpan, yPlotMin, ySpan };
   }, [sample, panel.plotType, panel.xParam, panel.yParam, indices, xDomainMax, yDomainMax, xLog, yLog]);
 
   // ---- Rendering ----
@@ -330,12 +344,14 @@ export function GatePanel({
     ctx.fillStyle = '#1a1b22';
     ctx.fillRect(0, 0, size.width, size.height);
 
+    const { labelFont, tickFont } = resolvePanelFont(panel.fontFamily, panel.fontSize);
+
     ctx.strokeStyle = '#3a3f4b';
     ctx.lineWidth = 1;
     ctx.strokeRect(MARGIN.left, MARGIN.top, plotWidth, plotHeight);
 
     ctx.fillStyle = '#9aa4b2';
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = tickFont;
     ctx.textAlign = 'center';
     const xTicks = xLog ? logTicks(xDomainMax) : niceTicks(0, xDomainMax);
     for (const t of xTicks) {
@@ -361,7 +377,7 @@ export function GatePanel({
     }
     ctx.textAlign = 'center';
     ctx.fillStyle = '#c7cdd6';
-    ctx.font = '11px system-ui, sans-serif';
+    ctx.font = labelFont;
     ctx.fillText((panel.xAxisLabel || panel.xParam) + (xLog ? ' (log)' : ''), MARGIN.left + plotWidth / 2, size.height - 6);
     ctx.save();
     ctx.translate(12, MARGIN.top + plotHeight / 2);
@@ -400,7 +416,7 @@ export function GatePanel({
         if (!ownColor) {
           const count = densityGrid.counts[densityGrid.binOf[i]];
           const t = Math.log1p(count) / Math.log1p(densityGrid.maxCount);
-          ctx.fillStyle = densityColor(t);
+          ctx.fillStyle = densityColor(t, panel.colormap ?? DEFAULT_COLORMAP);
         }
         ctx.fillRect(px - 1, py - 1, 2, 2);
       }
@@ -448,6 +464,17 @@ export function GatePanel({
     if (mode === 'range' && rangeDraft) {
       drawRangeOverlay(ctx, xToPx, rangeDraft.min, rangeDraft.max, MARGIN.top, plotHeight, '', DEFAULT_GATE_COLOR, true);
     }
+    if (mode === 'contour' && contourPreviewPoints && contourPreviewPoints.length >= 3) {
+      drawShapeOverlay(
+        ctx,
+        xToPx,
+        yToPx,
+        { kind: 'polygon', xParam: panel.xParam, yParam: panel.yParam, points: contourPreviewPoints },
+        '',
+        DEFAULT_GATE_COLOR,
+        true
+      );
+    }
     if (mode === 'polygon' && polyPoints.length > 0) {
       ctx.strokeStyle = '#ff9f1c';
       ctx.setLineDash([5, 3]);
@@ -481,7 +508,7 @@ export function GatePanel({
     const lines: string[] = [];
     if (panel.gateId !== ROOT_GATE_ID) lines.push(`${percentParent.toFixed(1)}% of parent`);
     lines.push(`${percentTotal.toFixed(1)}% of total`);
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = resolvePanelFont(panel.fontFamily, panel.fontSize).tickFont;
     ctx.textAlign = 'left';
     const textWidth = Math.max(...lines.map((l) => ctx.measureText(l).width));
     const boxWidth = textWidth + ANNOTATION_PADDING * 2;
@@ -550,7 +577,7 @@ export function GatePanel({
     ctx.setLineDash([]);
     if (label) {
       ctx.fillStyle = isDraft ? '#ff9f1c' : color;
-      ctx.font = '10px system-ui, sans-serif';
+      ctx.font = resolvePanelFont(panel.fontFamily, panel.fontSize).tickFont;
       ctx.textAlign = 'left';
       ctx.fillText(label, labelX, labelY);
     }
@@ -582,7 +609,7 @@ export function GatePanel({
     ctx.setLineDash([]);
     if (label) {
       ctx.fillStyle = isDraft ? '#ff9f1c' : color;
-      ctx.font = '10px system-ui, sans-serif';
+      ctx.font = resolvePanelFont(panel.fontFamily, panel.fontSize).tickFont;
       ctx.textAlign = 'left';
       ctx.fillText(label, x1 + 3, top + 12);
     }
@@ -612,7 +639,7 @@ export function GatePanel({
     ctx.stroke();
     ctx.setLineDash([]);
     if (labels) {
-      ctx.font = '10px system-ui, sans-serif';
+      ctx.font = resolvePanelFont(panel.fontFamily, panel.fontSize).tickFont;
       ctx.textAlign = 'right';
       if (labels.UL) {
         ctx.fillStyle = labelColors?.UL ?? DEFAULT_GATE_COLOR;
@@ -770,8 +797,49 @@ export function GatePanel({
         }
       }
       setPolyPoints((pts) => [...pts, data]);
+    } else if (mode === 'contour') {
+      if (contourPreviewPoints && contourPreviewPoints.length >= 3) {
+        setPendingShape({ kind: 'polygon', xParam: panel.xParam, yParam: panel.yParam, points: contourPreviewPoints });
+      }
     }
   }
+
+  // Traces the density contour loop under `data` at the given sensitivity, in data-space
+  // coordinates, by running marching squares on the existing pseudocolor density grid.
+  function computeContourAt(data: Point, thresholdPct: number): Point[] | null {
+    if (!densityGrid) return null;
+    const { gridN, xPlotMin, xSpan, yPlotMin, ySpan, counts, maxCount } = densityGrid;
+    const gx = ((dataToPlotValue(data.x, xLog) - xPlotMin) / xSpan) * gridN;
+    const gy = ((dataToPlotValue(data.y, yLog) - yPlotMin) / ySpan) * gridN;
+    if (gx < 0 || gx > gridN || gy < 0 || gy > gridN) return null;
+    const threshold = maxCount * (thresholdPct / 100);
+    const loops = marchingSquares(counts, gridN, threshold);
+    const loop = findLoopContainingPoint(loops, { x: gx, y: gy });
+    if (!loop) return null;
+    return loop.map((p) => ({
+      x: plotValueToData(xPlotMin + (p.x / gridN) * xSpan, xLog),
+      y: plotValueToData(yPlotMin + (p.y / gridN) * ySpan, yLog),
+    }));
+  }
+
+  // Attached as a native (non-passive) listener so we can preventDefault() to stop the page
+  // from scrolling while the user scrolls over the canvas to adjust contour sensitivity —
+  // React's onWheel is passive by default and can't block the browser's scroll.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || mode !== 'contour') return;
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      const next = Math.max(
+        MIN_CONTOUR_THRESHOLD_PCT,
+        Math.min(MAX_CONTOUR_THRESHOLD_PCT, contourThresholdPct + (e.deltaY > 0 ? -CONTOUR_THRESHOLD_STEP_PCT : CONTOUR_THRESHOLD_STEP_PCT))
+      );
+      setContourThresholdPct(next);
+      if (lastCursorDataRef.current) setContourPreviewPoints(computeContourAt(lastCursorDataRef.current, next));
+    }
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  });
 
   function handleMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
     if (annotDrag) {
@@ -803,6 +871,12 @@ export function GatePanel({
     }
     if (mode === 'polygon' && polyPoints.length > 0) {
       setCursorData(getMouseData(e));
+    }
+    if (mode === 'contour') {
+      const data = getMouseData(e);
+      lastCursorDataRef.current = data;
+      setContourPreviewPoints(computeContourAt(data, contourThresholdPct));
+      return;
     }
     if (!drawing) return;
     const data = getMouseData(e);
@@ -1077,6 +1151,13 @@ export function GatePanel({
               >
                 ✛
               </button>
+              <button
+                className={`btn btn-small ${mode === 'contour' ? 'btn-active' : ''}`}
+                title="Contour gate: hover a density region to preview its outline, scroll to adjust sensitivity, click to create the gate"
+                onClick={() => setMode(mode === 'contour' ? 'none' : 'contour')}
+              >
+                ≈
+              </button>
             </>
           ) : (
             <button
@@ -1095,6 +1176,7 @@ export function GatePanel({
                 setRangeDraft(null);
                 setPolyPoints([]);
                 setQuadrantDraft(null);
+                setContourPreviewPoints(null);
               }}
             >
               Cancel
@@ -1103,10 +1185,56 @@ export function GatePanel({
         </div>
         <span className="event-count">{indices.length.toLocaleString()}</span>
       </div>
+      <div className="plot-toolbar">
+        {panel.plotType === 'scatter' && (
+          <label>
+            Colors:
+            <select
+              value={panel.colormap ?? DEFAULT_COLORMAP}
+              onChange={(e) => updatePanelColormap(sample.id, panel.id, e.target.value as ColormapId)}
+            >
+              {COLORMAP_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {COLORMAP_LABELS[id]}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label>
+          Font:
+          <select
+            value={panel.fontFamily ?? FONT_FAMILY_OPTIONS[0].id}
+            onChange={(e) => updatePanelFont(sample.id, panel.id, e.target.value, panel.fontSize ?? null)}
+          >
+            {FONT_FAMILY_OPTIONS.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Size:
+          <input
+            type="number"
+            className="font-size-input"
+            min={MIN_FONT_SIZE}
+            max={MAX_FONT_SIZE}
+            value={panel.fontSize ?? DEFAULT_FONT_SIZE}
+            onChange={(e) => updatePanelFont(sample.id, panel.id, panel.fontFamily ?? null, Number(e.target.value))}
+          />
+        </label>
+      </div>
       {mode === 'polygon' && (
         <div className="hint">Click vertices; click near the first, dbl-click, or Enter to close.</div>
       )}
       {mode === 'quadrant' && <div className="hint">Click-drag to place the crosshair; release to create 4 gates.</div>}
+      {mode === 'contour' && (
+        <div className="hint">
+          Hover a density region to preview its contour; scroll to adjust sensitivity ({contourThresholdPct}%); click to create the gate.
+        </div>
+      )}
       {mode === 'none' && quadrantGroups.size > 0 && (
         <div className="hint hint-subtle">Drag a crosshair intersection to reposition its 4 quadrants.</div>
       )}

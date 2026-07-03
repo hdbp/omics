@@ -23,6 +23,9 @@ A lightweight, standalone viewer for flow cytometry `.fcs` files that mimics Flo
 - **Choose which stats print under each Layout panel** — click **Stats ▾** on a Layout panel to pick which fields (population path, count, % parent, % total, median X, median Y) appear as a text line under its plot. Baked into **Export layout as PNG** too, so the exported figure carries the numbers, not just the plot.
 - **Light or dark background on export** — the app's own UI is always dark, but **Export layout as PNG** (in both a sample's workspace and the Layout) has a **Light bg / Dark bg** toggle next to it. Light re-renders the whole figure — panel chrome, axes, ticks, gate outlines, the stats badge — in publication-friendly colors (white background, dark text) instead of a screenshot of the dark UI; the density colormap and any custom gate colors are unchanged either way.
 - **Save/open a project, like an RStudio workspace** — **Save Project…** in the sidebar writes every loaded sample's *raw event data* plus its gates, panels, colors, axis labels, and stats-annotation positions, and the whole Layout collage, to a single `.fcsproj` file. **Open Project…** restores all of it exactly — you don't need the original `.fcs` files again to pick up where you left off.
+- **Contour/density gate tool** — click the **≈** tool on a dot plot, then hover over a density region: its outline at the current sensitivity is traced live (the same pseudocolor density grid the plot already renders from, contoured with marching squares) and previewed as a dashed loop. Scroll to make the contour tighter (higher-density core) or looser (more inclusive); click to turn the previewed outline into a gate. A contour gate is a regular polygon gate once created — it gets drag handles, a color swatch, a row in the statistics table, and survives drilling down, "Apply to other samples," Layout, PNG export, and project save/load exactly like one drawn by hand.
+- **Choose the density pseudocolor palette** — a **Colors** dropdown on every dot-plot panel (sample workspace, Layout, and baked into PNG export) switches the density heatmap between Rainbow (the default FlowJo-style jet palette), Viridis, Plasma, Fire, and Grayscale. Set independently per panel; carried over to the Layout and to "Apply gating strategy to other samples."
+- **Format panel fonts** — **Font** and **Size** controls on every panel change the typeface (System UI, Arial, Georgia, Times New Roman, Courier New, or Verdana) and size (8–20px) used for axis labels, tick numbers, gate/quadrant labels, and the stats annotation — live in the workspace, the Layout, and PNG export. Set independently per panel; carried over to the Layout and to "Apply gating strategy to other samples."
 
 Not included in this version: compensation/spillover matrices and full biexponential/logicle transforms — the log option is a straight log10 (floored at 1), not FlowJo's logicle.
 
@@ -80,10 +83,11 @@ Google Drive and OneDrive aren't wired up yet; Dropbox was the simplest to start
 
 1. Drop one or more `.fcs` files onto the panel on the left (or click it to browse). Each sample opens with one root panel showing all events.
 2. In a panel, pick X/Y parameters from its dropdowns, switch between **Dot plot** and **Histogram**, and toggle **log X**/**log Y** as needed.
-3. Click the **▭** (rectangle), **⬠** (polygon), **✛** (quadrant), or **↔** (range, histogram only) button, then draw on that panel's plot:
+3. Click the **▭** (rectangle), **⬠** (polygon), **✛** (quadrant), **≈** (contour, dot plots only), or **↔** (range, histogram only) button, then draw on that panel's plot:
    - Rectangle/range: click-drag.
    - Polygon: click to add each vertex, then click near the first vertex, double-click, or press <kbd>Enter</kbd> to close it. <kbd>Esc</kbd> cancels.
    - Quadrant (dot plots only): click-drag to place the crosshair, release to instantly create all 4 quadrant gates (auto-named, no dialog) — each one's count and % of parent appear right next to its name on the plot. Afterward, drag the crosshair intersection again (with no tool active) to reposition all 4 together — the on-plot numbers update live.
+   - Contour (dot plots only): hover over a density region to preview its outline (traced from the same density grid the plot renders), scroll to tighten or loosen the sensitivity (shown as a % in the hint text), then click to turn the previewed outline into a gate — named like any other gate and just as editable afterward.
 4. For rectangle/polygon/range gates, name the gate when prompted; its outline appears on the panel you drew it on, with small handles at its corners/vertices/edges.
 5. **Click inside a gated region** (with no drawing tool active) to drill down — this opens a *new panel* for that population, connected to the one you drew from, with fresh default axes so you can immediately pick different channels (e.g. GFP/BFP). Works for quadrant regions too. Repeat to build out the full gating tree as a chain of linked panels.
 6. **Go back and adjust a gate any time** — on the panel where you drew it, drag one of its handles to reshape it, or drag its body (away from a handle) to move it. A plain click still drills down; only an actual drag reshapes/moves. Any panel already drilled into that gate (or a descendant of it) updates its population and stats immediately.
@@ -100,6 +104,8 @@ Google Drive and OneDrive aren't wired up yet; Dropbox was the simplest to start
 17. Before exporting a PNG (sample workspace or Layout), pick **Light bg** or **Dark bg** next to the export button — Light re-renders the whole figure in white/dark-text for a publication-ready image, independent of the app's own (always-dark) interface.
 18. Click **Save Project…** at the top of the sidebar any time to download a `.fcsproj` file with everything currently loaded — samples' raw data, gates, panels, colors, custom axis labels, and the Layout collage. Later, click **Open Project…** and pick that file to restore the exact same workspace (confirms first if you already have samples loaded, since it replaces them).
 19. If you've configured a Dropbox app key (see "Cloud storage integration"), click **Import from Dropbox…** next to the dropzone to pick `.fcs` files straight out of your Dropbox instead of downloading them first.
+20. On any dot-plot panel, use the **Colors** dropdown to switch the density heatmap palette (Rainbow/Viridis/Plasma/Fire/Grayscale) — set per panel, carried over to the Layout and PNG export.
+21. Use the **Font** dropdown and **Size** field on any panel to change the typeface and size used for axis labels, tick numbers, and gate/stats text — set per panel, carried over to the Layout and PNG export.
 
 ## Project layout
 
@@ -112,7 +118,8 @@ src/
 │   ├── gateTypes.ts      Gate shape/node types (rectangle, polygon, range, quadrant) + optional color
 │   ├── gateEval.ts       Point-in-gate tests, ancestor-chain evaluation
 │   ├── gateStats.ts      Per-gate count/%/median statistics; shared formatting for the Layout stats block/CSV/PNG export; per-quadrant stats grouping
-│   └── gateClone.ts      Clones a gate hierarchy (+ id map, colors) onto another sample's parameters
+│   ├── gateClone.ts      Clones a gate hierarchy (+ id map, colors) onto another sample's parameters
+│   └── contour.ts        Marching-squares density contour tracing + point-in-polygon, for the contour gate tool
 ├── state/
 │   ├── store.ts          zustand store: samples, gate trees, panels, Layout collage, UI selection
 │   ├── panelLayout.ts    Panel sizing constants + size-aware auto-layout (tree + grid) algorithms
@@ -136,7 +143,8 @@ src/
 │   └── ApplyGatesDialog.tsx Modal for picking which samples to copy a gating strategy onto
 └── utils/
     ├── scale.ts           Linear/log10 domain↔pixel scaling, tick generation
-    ├── colormap.ts        Pseudocolor density gradient
+    ├── colormap.ts        Pseudocolor density gradients (Rainbow/Viridis/Plasma/Fire/Grayscale)
+    ├── fonts.ts            Shared font-family/size options + label/tick font resolution for panels
     ├── csv.ts             CSV download helper
     ├── exportImage.ts     PNG layout export helper
     ├── theme.ts            Light/dark color palettes for PNG export

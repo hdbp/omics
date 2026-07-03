@@ -5,7 +5,8 @@ import { ancestorChain, getGateEventIndices } from '../gating/gateEval';
 import { computeLayoutItemStats, formatStatsField, collectQuadrantGroups, type QuadrantStat } from '../gating/gateStats';
 import type { GateShape, QuadrantId } from '../gating/gateTypes';
 import { makeScale, toRange, niceTicks, logTicks, dataToPlotValue, type LinearScale } from '../utils/scale';
-import { densityColor } from '../utils/colormap';
+import { densityColor, COLORMAP_IDS, COLORMAP_LABELS, DEFAULT_COLORMAP, type ColormapId } from '../utils/colormap';
+import { FONT_FAMILY_OPTIONS, MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_FONT_SIZE, resolvePanelFont } from '../utils/fonts';
 
 const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
 const QUADRANT_LABEL_OFFSET = 6;
@@ -59,6 +60,8 @@ export function LayoutPanel({
     updateLayoutItemAxisLabel,
     updateLayoutItemStatsAnnotationPos,
     updateLayoutItemStatsFields,
+    updateLayoutItemColormap,
+    updateLayoutItemFont,
     relabelLayoutItem,
     removeLayoutItem,
   } = useStore();
@@ -204,12 +207,14 @@ export function LayoutPanel({
     ctx.fillStyle = '#1a1b22';
     ctx.fillRect(0, 0, size.width, size.height);
 
+    const { labelFont, tickFont } = resolvePanelFont(item.fontFamily, item.fontSize);
+
     ctx.strokeStyle = '#3a3f4b';
     ctx.lineWidth = 1;
     ctx.strokeRect(MARGIN.left, MARGIN.top, plotWidth, plotHeight);
 
     ctx.fillStyle = '#9aa4b2';
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = tickFont;
     ctx.textAlign = 'center';
     const xTicks = xLog ? logTicks(xDomainMax) : niceTicks(0, xDomainMax);
     for (const t of xTicks) {
@@ -233,7 +238,7 @@ export function LayoutPanel({
     }
     ctx.textAlign = 'center';
     ctx.fillStyle = '#c7cdd6';
-    ctx.font = '11px system-ui, sans-serif';
+    ctx.font = labelFont;
     ctx.fillText((item.xAxisLabel || item.xParam) + (xLog ? ' (log)' : ''), MARGIN.left + plotWidth / 2, size.height - 6);
     ctx.save();
     ctx.translate(12, MARGIN.top + plotHeight / 2);
@@ -272,7 +277,7 @@ export function LayoutPanel({
         if (!ownColor) {
           const count = densityGrid.counts[densityGrid.binOf[i]];
           const t = Math.log1p(count) / Math.log1p(densityGrid.maxCount);
-          ctx.fillStyle = densityColor(t);
+          ctx.fillStyle = densityColor(t, item.colormap ?? DEFAULT_COLORMAP);
         }
         ctx.fillRect(px - 1, py - 1, 2, 2);
       }
@@ -309,7 +314,7 @@ export function LayoutPanel({
     const lines: string[] = [];
     if (gateNode?.parentId) lines.push(`${percentParent.toFixed(1)}% of parent`);
     lines.push(`${percentTotal.toFixed(1)}% of total`);
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = resolvePanelFont(item.fontFamily, item.fontSize).tickFont;
     ctx.textAlign = 'left';
     const textWidth = Math.max(...lines.map((l) => ctx.measureText(l).width));
     const boxWidth = textWidth + ANNOTATION_PADDING * 2;
@@ -405,7 +410,7 @@ export function LayoutPanel({
     }
     if (label) {
       ctx.fillStyle = color;
-      ctx.font = '10px system-ui, sans-serif';
+      ctx.font = resolvePanelFont(item.fontFamily, item.fontSize).tickFont;
       ctx.textAlign = 'left';
       ctx.fillText(label, labelX, labelY);
     }
@@ -432,7 +437,7 @@ export function LayoutPanel({
     ctx.stroke();
     if (label) {
       ctx.fillStyle = color;
-      ctx.font = '10px system-ui, sans-serif';
+      ctx.font = resolvePanelFont(item.fontFamily, item.fontSize).tickFont;
       ctx.textAlign = 'left';
       ctx.fillText(label, x1 + 3, top + 12);
     }
@@ -458,7 +463,7 @@ export function LayoutPanel({
     ctx.moveTo(MARGIN.left, py);
     ctx.lineTo(MARGIN.left + plotWidth, py);
     ctx.stroke();
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = resolvePanelFont(item.fontFamily, item.fontSize).tickFont;
     ctx.textAlign = 'right';
     if (labels.UL) {
       ctx.fillStyle = labelColors.UL ?? DEFAULT_GATE_COLOR;
@@ -648,6 +653,47 @@ export function LayoutPanel({
           )}
         </div>
         <span className="event-count">{indices.length.toLocaleString()}</span>
+      </div>
+      <div className="plot-toolbar">
+        {item.plotType === 'scatter' && (
+          <label>
+            Colors:
+            <select
+              value={item.colormap ?? DEFAULT_COLORMAP}
+              onChange={(e) => updateLayoutItemColormap(item.id, e.target.value as ColormapId)}
+            >
+              {COLORMAP_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {COLORMAP_LABELS[id]}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label>
+          Font:
+          <select
+            value={item.fontFamily ?? FONT_FAMILY_OPTIONS[0].id}
+            onChange={(e) => updateLayoutItemFont(item.id, e.target.value, item.fontSize ?? null)}
+          >
+            {FONT_FAMILY_OPTIONS.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Size:
+          <input
+            type="number"
+            className="font-size-input"
+            min={MIN_FONT_SIZE}
+            max={MAX_FONT_SIZE}
+            value={item.fontSize ?? DEFAULT_FONT_SIZE}
+            onChange={(e) => updateLayoutItemFont(item.id, item.fontFamily ?? null, Number(e.target.value))}
+          />
+        </label>
       </div>
       <div className="plot-canvas-container" ref={containerRef}>
         <canvas

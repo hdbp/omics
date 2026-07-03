@@ -1,5 +1,6 @@
 import type { FCSParameter } from '../fcs/types';
 import type { GateNode } from '../gating/gateTypes';
+import type { ColormapId } from '../utils/colormap';
 
 /** Fractional (0-1) position of a draggable on-canvas annotation, relative to the plot area (not the whole panel). */
 export interface AnnotationPos {
@@ -42,6 +43,12 @@ export interface Panel {
   yAxisLabel?: string;
   /** Draggable position of the %parent/%total stats annotation drawn on the plot. Unset = default top-left placement. */
   statsAnnotation?: AnnotationPos;
+  /** Pseudocolor density palette for dot plots. Unset = the default "jet"-style rainbow. */
+  colormap?: ColormapId;
+  /** Font family (CSS value) for all text drawn on this panel's canvas. Unset = system UI font. */
+  fontFamily?: string;
+  /** Base font size (px) for axis labels; ticks/quadrant/annotation text render 1px smaller. Unset = 11. */
+  fontSize?: number;
   /** Position within the sample's workspace canvas, in px. */
   x: number;
   y: number;
@@ -74,6 +81,12 @@ export interface LayoutItem {
   statsAnnotation?: AnnotationPos;
   /** Which stats fields to print in the text block under this panel's plot. Unset = DEFAULT_STATS_FIELDS. */
   statsFields?: StatsFieldKey[];
+  /** Pseudocolor density palette for dot plots. Unset = the default "jet"-style rainbow. */
+  colormap?: ColormapId;
+  /** Font family (CSS value) for all text drawn on this item's canvas. Unset = system UI font. */
+  fontFamily?: string;
+  /** Base font size (px) for axis labels; ticks/quadrant/annotation text render 1px smaller. Unset = 11. */
+  fontSize?: number;
   x: number;
   y: number;
   width: number;

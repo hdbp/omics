@@ -483,6 +483,11 @@
   font-size: 11px;
   padding: 2px 4px;
 }
+.font-size-input {
+  width: 44px;
+  font-size: 11px;
+  padding: 2px 4px;
+}
 .event-count {
   margin-left: auto;
   color: #6b7280;

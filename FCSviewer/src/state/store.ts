@@ -17,6 +17,7 @@ import {
 } from './panelLayout';
 import type { Sample, Panel, LayoutItem, StatsFieldKey } from './types';
 import type { FCSParameter } from '../fcs/types';
+import type { ColormapId } from '../utils/colormap';
 
 const QUADRANT_IDS: QuadrantId[] = ['UL', 'UR', 'LL', 'LR'];
 
@@ -69,6 +70,9 @@ function clonePanels(
       xAxisLabel: xOk ? src.xAxisLabel : undefined,
       yAxisLabel: yOk ? src.yAxisLabel : undefined,
       statsAnnotation: src.statsAnnotation,
+      colormap: src.colormap,
+      fontFamily: src.fontFamily,
+      fontSize: src.fontSize,
       x: src.x,
       y: src.y,
       width: src.width,
@@ -127,6 +131,10 @@ interface AppState {
   updatePanelAxisLabel: (sampleId: string, panelId: string, axis: 'xAxisLabel' | 'yAxisLabel', label: string | null) => void;
   /** Repositions the draggable %parent/%total stats annotation drawn on a panel's plot. */
   updatePanelStatsAnnotationPos: (sampleId: string, panelId: string, xFrac: number, yFrac: number) => void;
+  /** Pseudocolor density palette for a panel's dot plot; pass null to revert to the default rainbow. */
+  updatePanelColormap: (sampleId: string, panelId: string, colormap: ColormapId | null) => void;
+  /** Font family/size for all text on a panel's canvas; pass null to revert to the default. */
+  updatePanelFont: (sampleId: string, panelId: string, fontFamily: string | null, fontSize: number | null) => void;
   movePanel: (sampleId: string, panelId: string, x: number, y: number) => void;
   resizePanel: (sampleId: string, panelId: string, width: number, height: number) => void;
   removePanel: (sampleId: string, panelId: string) => void;
@@ -159,6 +167,10 @@ interface AppState {
   updateLayoutItemStatsAnnotationPos: (itemId: string, xFrac: number, yFrac: number) => void;
   /** Which fields the stats block under a Layout item's plot should print. */
   updateLayoutItemStatsFields: (itemId: string, fields: StatsFieldKey[]) => void;
+  /** Pseudocolor density palette for a Layout item's dot plot; pass null to revert to the default rainbow. */
+  updateLayoutItemColormap: (itemId: string, colormap: ColormapId | null) => void;
+  /** Font family/size for all text on a Layout item's canvas; pass null to revert to the default. */
+  updateLayoutItemFont: (itemId: string, fontFamily: string | null, fontSize: number | null) => void;
   updateLayoutItemLogScale: (itemId: string, axis: 'xLogScale' | 'yLogScale', value: boolean) => void;
   relabelLayoutItem: (itemId: string, label: string) => void;
   moveLayoutItem: (itemId: string, x: number, y: number) => void;
@@ -288,6 +300,24 @@ export const useStore = create<AppState>((set, get) => ({
       samples: updateSample(state.samples, sampleId, (s) => ({
         ...s,
         panels: s.panels.map((p) => (p.id === panelId ? { ...p, statsAnnotation: { xFrac, yFrac } } : p)),
+      })),
+    })),
+
+  updatePanelColormap: (sampleId, panelId, colormap) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => ({
+        ...s,
+        panels: s.panels.map((p) => (p.id === panelId ? { ...p, colormap: colormap ?? undefined } : p)),
+      })),
+    })),
+
+  updatePanelFont: (sampleId, panelId, fontFamily, fontSize) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => ({
+        ...s,
+        panels: s.panels.map((p) =>
+          p.id === panelId ? { ...p, fontFamily: fontFamily ?? undefined, fontSize: fontSize ?? undefined } : p
+        ),
       })),
     })),
 
@@ -544,6 +574,9 @@ export const useStore = create<AppState>((set, get) => ({
         xAxisLabel: panel.xAxisLabel,
         yAxisLabel: panel.yAxisLabel,
         statsAnnotation: panel.statsAnnotation,
+        colormap: panel.colormap,
+        fontFamily: panel.fontFamily,
+        fontSize: panel.fontSize,
         x: pos.x,
         y: pos.y,
         width: panel.width,
@@ -579,6 +612,18 @@ export const useStore = create<AppState>((set, get) => ({
   updateLayoutItemStatsFields: (itemId, fields) =>
     set((state) => ({
       layoutItems: state.layoutItems.map((it) => (it.id === itemId ? { ...it, statsFields: fields } : it)),
+    })),
+
+  updateLayoutItemColormap: (itemId, colormap) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) => (it.id === itemId ? { ...it, colormap: colormap ?? undefined } : it)),
+    })),
+
+  updateLayoutItemFont: (itemId, fontFamily, fontSize) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) =>
+        it.id === itemId ? { ...it, fontFamily: fontFamily ?? undefined, fontSize: fontSize ?? undefined } : it
+      ),
     })),
 
   updateLayoutItemLogScale: (itemId, axis, value) =>

@@ -3,7 +3,8 @@ import { getGateEventIndices } from '../gating/gateEval';
 import { gatePercentages, collectQuadrantGroups, type QuadrantStat } from '../gating/gateStats';
 import type { GateNode, GateShape, QuadrantId } from '../gating/gateTypes';
 import { makeScale, toRange, niceTicks, logTicks, dataToPlotValue, type LinearScale } from './scale';
-import { densityColor, hexToRgba } from './colormap';
+import { densityColor, hexToRgba, DEFAULT_COLORMAP, type ColormapId } from './colormap';
+import { resolvePanelFont } from './fonts';
 import type { PlotTheme } from './theme';
 
 const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
@@ -38,6 +39,9 @@ export interface PlotRenderSpec {
   xAxisLabel?: string;
   yAxisLabel?: string;
   statsAnnotation?: { xFrac: number; yFrac: number };
+  colormap?: ColormapId;
+  fontFamily?: string;
+  fontSize?: number;
 }
 
 /**
@@ -130,12 +134,14 @@ export function drawPlotPanel(
     densityGrid = { counts, binOf, maxCount };
   }
 
+  const { labelFont, tickFont } = resolvePanelFont(spec.fontFamily, spec.fontSize);
+
   ctx.strokeStyle = theme.plotBorder;
   ctx.lineWidth = 1;
   ctx.strokeRect(left, top, plotWidth, plotHeight);
 
   ctx.fillStyle = theme.tickText;
-  ctx.font = '10px system-ui, sans-serif';
+  ctx.font = tickFont;
   ctx.textAlign = 'center';
   const xTicks = xLog ? logTicks(xDomainMax) : niceTicks(0, xDomainMax);
   for (const t of xTicks) {
@@ -158,7 +164,7 @@ export function drawPlotPanel(
   }
   ctx.textAlign = 'center';
   ctx.fillStyle = theme.axisLabelText;
-  ctx.font = '11px system-ui, sans-serif';
+  ctx.font = labelFont;
   ctx.fillText((spec.xAxisLabel || xParam) + (xLog ? ' (log)' : ''), left + plotWidth / 2, originY + height - 6);
   ctx.save();
   ctx.translate(originX + 12, top + plotHeight / 2);
@@ -193,7 +199,7 @@ export function drawPlotPanel(
       if (!ownColor) {
         const count = densityGrid.counts[densityGrid.binOf[i]];
         const t = Math.log1p(count) / Math.log1p(densityGrid.maxCount);
-        ctx.fillStyle = densityColor(t);
+        ctx.fillStyle = densityColor(t, spec.colormap ?? DEFAULT_COLORMAP);
       }
       ctx.fillRect(px - 1, py - 1, 2, 2);
     }
@@ -204,20 +210,20 @@ export function drawPlotPanel(
     const shape = child.shape;
     if (!shape) continue;
     if (shape.kind === 'range' && plotType === 'histogram' && shape.param === xParam) {
-      drawRangeOverlay(ctx, xToPx, shape.min, shape.max, top, plotHeight, child.name, child.color ?? theme.defaultGateColor);
+      drawRangeOverlay(ctx, xToPx, shape.min, shape.max, top, plotHeight, child.name, child.color ?? theme.defaultGateColor, tickFont);
     } else if ((shape.kind === 'rectangle' || shape.kind === 'polygon') && plotType === 'scatter' && shape.xParam === xParam && shape.yParam === yParam) {
-      drawShapeOverlay(ctx, xToPx, yToPx, shape, child.name, child.color ?? theme.defaultGateColor);
+      drawShapeOverlay(ctx, xToPx, yToPx, shape, child.name, child.color ?? theme.defaultGateColor, tickFont);
     }
   }
   if (plotType === 'scatter') {
     for (const group of collectQuadrantGroups(sample, gateNode, xParam, yParam).values()) {
-      drawQuadrantCrosshair(ctx, xToPx, yToPx, group.x, group.y, group.labels, group.colors, group.stats, top, plotHeight, left, plotWidth, theme);
+      drawQuadrantCrosshair(ctx, xToPx, yToPx, group.x, group.y, group.labels, group.colors, group.stats, top, plotHeight, left, plotWidth, theme, tickFont);
     }
   }
 
   ctx.restore();
 
-  drawStatsAnnotation(ctx, left, top, plotWidth, plotHeight, spec.statsAnnotation, gateNode, indices, sample, theme);
+  drawStatsAnnotation(ctx, left, top, plotWidth, plotHeight, spec.statsAnnotation, gateNode, indices, sample, theme, tickFont);
 }
 
 function drawShapeOverlay(
@@ -226,7 +232,8 @@ function drawShapeOverlay(
   yPx: (raw: number) => number,
   shape: GateShape,
   label: string,
-  color: string
+  color: string,
+  font: string
 ) {
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
@@ -257,7 +264,7 @@ function drawShapeOverlay(
   }
   if (label) {
     ctx.fillStyle = color;
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = font;
     ctx.textAlign = 'left';
     ctx.fillText(label, labelX, labelY);
   }
@@ -271,7 +278,8 @@ function drawRangeOverlay(
   top: number,
   height: number,
   label: string,
-  color: string
+  color: string,
+  font: string
 ) {
   const x1 = xPx(Math.min(min, max));
   const x2 = xPx(Math.max(min, max));
@@ -286,7 +294,7 @@ function drawRangeOverlay(
   ctx.stroke();
   if (label) {
     ctx.fillStyle = color;
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = font;
     ctx.textAlign = 'left';
     ctx.fillText(label, x1 + 3, top + 12);
   }
@@ -305,7 +313,8 @@ function drawQuadrantCrosshair(
   plotHeight: number,
   left: number,
   plotWidth: number,
-  theme: PlotTheme
+  theme: PlotTheme,
+  font: string
 ) {
   const px = xPx(x);
   const py = yPx(y);
@@ -317,7 +326,7 @@ function drawQuadrantCrosshair(
   ctx.moveTo(left, py);
   ctx.lineTo(left + plotWidth, py);
   ctx.stroke();
-  ctx.font = '10px system-ui, sans-serif';
+  ctx.font = font;
   ctx.textAlign = 'right';
   if (labels.UL) {
     ctx.fillStyle = labelColors.UL ?? theme.defaultGateColor;
@@ -352,14 +361,15 @@ function drawStatsAnnotation(
   gateNode: GateNode | undefined,
   indices: Uint32Array,
   sample: Sample,
-  theme: PlotTheme
+  theme: PlotTheme,
+  font: string
 ) {
   const frac = annotation ?? DEFAULT_STATS_ANNOTATION;
   const { percentParent, percentTotal } = gatePercentages(sample, gateNode, indices);
   const lines: string[] = [];
   if (gateNode?.parentId) lines.push(`${percentParent.toFixed(1)}% of parent`);
   lines.push(`${percentTotal.toFixed(1)}% of total`);
-  ctx.font = '10px system-ui, sans-serif';
+  ctx.font = font;
   ctx.textAlign = 'left';
   const textWidth = Math.max(...lines.map((l) => ctx.measureText(l).width));
   const boxWidth = textWidth + ANNOTATION_PADDING * 2;
