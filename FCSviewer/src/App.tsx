@@ -7,6 +7,8 @@ import { GateTree } from './components/GateTree';
 import { PanelWorkspace } from './components/PanelWorkspace';
 import { LayoutWorkspace } from './components/LayoutWorkspace';
 import { LayoutSidebar } from './components/LayoutSidebar';
+import { Notebook } from './components/Notebook';
+import { NotebookSidebar } from './components/NotebookSidebar';
 import { StatsTable } from './components/StatsTable';
 import { computeGateStats } from './gating/gateStats';
 import './App.css';
@@ -37,10 +39,13 @@ function App() {
           <SampleList />
           {sample && state.mainView === 'samples' && <GateTree sample={sample} stats={stats} />}
           <LayoutSidebar />
+          <NotebookSidebar />
         </aside>
         <main className="main-content">
           {state.mainView === 'layout' ? (
             <LayoutWorkspace />
+          ) : state.mainView === 'notebook' ? (
+            <Notebook />
           ) : sample ? (
             <>
               <PanelWorkspace sample={sample} />

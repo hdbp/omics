@@ -114,9 +114,13 @@ interface AppState {
   /** The cross-sample collage of curated panels, for assembling a publish-quality figure. */
   layoutItems: LayoutItem[];
   focusedLayoutItemId: string | null;
-  /** Which main-content view is showing: the active sample's analysis workspace, or the Layout collage. */
-  mainView: 'samples' | 'layout';
-  setMainView: (view: 'samples' | 'layout') => void;
+  /** Which main-content view is showing: the active sample's analysis workspace, the Layout collage, or the Notebook. */
+  mainView: 'samples' | 'layout' | 'notebook';
+  setMainView: (view: 'samples' | 'layout' | 'notebook') => void;
+
+  /** Free-text notes about the assay/experiment, shared across the whole project. Saved with the project file. */
+  notebookText: string;
+  updateNotebookText: (text: string) => void;
 
   loadFiles: (files: FileList | File[]) => Promise<void>;
   removeSample: (sampleId: string) => void;
@@ -184,7 +188,8 @@ interface AppState {
     samples: Sample[];
     layoutItems: LayoutItem[];
     activeSampleId: string | null;
-    mainView: 'samples' | 'layout';
+    mainView: 'samples' | 'layout' | 'notebook';
+    notebookText: string;
   }) => void;
 }
 
@@ -202,11 +207,13 @@ export const useStore = create<AppState>((set, get) => ({
   layoutItems: [],
   focusedLayoutItemId: null,
   mainView: 'samples',
+  notebookText: '',
 
   clearError: () => set({ error: null }),
   clearNotice: () => set({ notice: null }),
   focusPanel: (panelId) => set({ focusedPanelId: panelId }),
   setMainView: (view) => set({ mainView: view }),
+  updateNotebookText: (text) => set({ notebookText: text }),
 
   loadFiles: async (fileList) => {
     const files = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith('.fcs'));
@@ -659,12 +666,13 @@ export const useStore = create<AppState>((set, get) => ({
 
   focusLayoutItem: (itemId) => set({ focusedLayoutItemId: itemId }),
 
-  loadProject: ({ samples, layoutItems, activeSampleId, mainView }) =>
+  loadProject: ({ samples, layoutItems, activeSampleId, mainView, notebookText }) =>
     set({
       samples,
       layoutItems,
       activeSampleId,
       mainView,
+      notebookText,
       focusedPanelId: null,
       focusedLayoutItemId: null,
       loading: false,

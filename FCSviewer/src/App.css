@@ -424,6 +424,24 @@
   line-height: 1.5;
   margin: 0;
 }
+.notebook-sidebar .layout-sidebar-hint {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notebook-textarea {
+  flex: 1;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #e5e7eb;
+  font: 13px/1.6 system-ui, sans-serif;
+  padding: 16px 18px;
+}
+.notebook-textarea::placeholder {
+  color: #5c6270;
+}
 .layout-empty-state {
   display: flex;
   flex-direction: column;

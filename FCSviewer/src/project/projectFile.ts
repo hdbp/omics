@@ -12,16 +12,19 @@ interface ProjectMeta {
   version: number;
   savedAt: string;
   activeSampleId: string | null;
-  mainView: 'samples' | 'layout';
+  mainView: 'samples' | 'layout' | 'notebook';
   layoutItems: LayoutItem[];
   samples: SampleMeta[];
+  /** Free-text assay/experiment notes. Optional on read since older project files predate this field. */
+  notebookText?: string;
 }
 
 export interface ProjectState {
   samples: Sample[];
   layoutItems: LayoutItem[];
   activeSampleId: string | null;
-  mainView: 'samples' | 'layout';
+  mainView: 'samples' | 'layout' | 'notebook';
+  notebookText: string;
 }
 
 export class ProjectFileError extends Error {}
@@ -44,6 +47,7 @@ export function serializeProject(state: ProjectState): Blob {
     savedAt: new Date().toISOString(),
     activeSampleId: state.activeSampleId,
     mainView: state.mainView,
+    notebookText: state.notebookText,
     layoutItems: state.layoutItems,
     samples: state.samples.map(({ data: _data, ...rest }) => rest),
   };
@@ -112,5 +116,11 @@ export async function deserializeProject(file: Blob): Promise<ProjectState> {
     return { ...sm, data };
   });
 
-  return { samples, layoutItems: meta.layoutItems, activeSampleId: meta.activeSampleId, mainView: meta.mainView };
+  return {
+    samples,
+    layoutItems: meta.layoutItems,
+    activeSampleId: meta.activeSampleId,
+    mainView: meta.mainView,
+    notebookText: meta.notebookText ?? '',
+  };
 }

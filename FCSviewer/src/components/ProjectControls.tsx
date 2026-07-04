@@ -10,13 +10,13 @@ import { downloadBlob } from '../utils/download';
  * .fcs files (much like an RStudio .RData workspace).
  */
 export function ProjectControls() {
-  const { samples, layoutItems, activeSampleId, mainView, loadProject } = useStore();
+  const { samples, layoutItems, activeSampleId, mainView, notebookText, loadProject } = useStore();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   function handleSave() {
-    const blob = serializeProject({ samples, layoutItems, activeSampleId, mainView });
+    const blob = serializeProject({ samples, layoutItems, activeSampleId, mainView, notebookText });
     const stamp = new Date().toISOString().slice(0, 10);
     downloadBlob(`fcsviewer_project_${stamp}.fcsproj`, blob);
   }
