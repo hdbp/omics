@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { getColumn, DEFAULT_STATS_FIELDS, STATS_FIELD_LABELS, type Sample, type LayoutItem, type StatsFieldKey } from '../state/types';
+import { getColumn, DEFAULT_STATS_FIELDS, STATS_FIELD_LABELS, type Sample, type LayoutItem, type LayoutOverlayRef, type StatsFieldKey } from '../state/types';
 import { ancestorChain, getGateEventIndices } from '../gating/gateEval';
 import { computeLayoutItemStats, formatStatsField, collectQuadrantGroups, type QuadrantStat } from '../gating/gateStats';
 import type { GateShape, QuadrantId } from '../gating/gateTypes';
 import { makeScale, toRange, niceTicks, logTicks, dataToPlotValue, type LinearScale } from '../utils/scale';
-import { densityColor, COLORMAP_IDS, COLORMAP_LABELS, DEFAULT_COLORMAP, type ColormapId } from '../utils/colormap';
+import { densityColor, hexToRgba, COLORMAP_IDS, COLORMAP_LABELS, DEFAULT_COLORMAP, type ColormapId } from '../utils/colormap';
 import { FONT_FAMILY_OPTIONS, MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_FONT_SIZE, resolvePanelFont } from '../utils/fonts';
 
 const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
@@ -54,6 +54,8 @@ export function LayoutPanel({
   onResizeHandleDown,
 }: Props) {
   const {
+    samples,
+    layoutItems,
     updateLayoutItemAxis,
     updateLayoutItemPlotType,
     updateLayoutItemLogScale,
@@ -64,11 +66,15 @@ export function LayoutPanel({
     updateLayoutItemFont,
     relabelLayoutItem,
     removeLayoutItem,
+    addLayoutOverlay,
+    removeLayoutOverlay,
+    clearLayoutOverlays,
   } = useStore();
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const statsPickerRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const annotBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelValue, setLabelValue] = useState('');
@@ -77,6 +83,8 @@ export function LayoutPanel({
     null
   );
   const [statsPickerOpen, setStatsPickerOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [overlaySubmenuOpen, setOverlaySubmenuOpen] = useState(false);
 
   const xLog = item.xLogScale;
   const yLog = item.plotType === 'scatter' && item.yLogScale;
@@ -91,6 +99,22 @@ export function LayoutPanel({
     window.addEventListener('mousedown', onDocMouseDown);
     return () => window.removeEventListener('mousedown', onDocMouseDown);
   }, [statsPickerOpen]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    function onDocMouseDown(e: MouseEvent) {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) setContextMenu(null);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setContextMenu(null);
+    }
+    window.addEventListener('mousedown', onDocMouseDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDocMouseDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [contextMenu]);
 
   useEffect(() => {
     if (isFocused) rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
@@ -255,21 +279,31 @@ export function LayoutPanel({
     ctx.rect(MARGIN.left, MARGIN.top, plotWidth, plotHeight);
     ctx.clip();
 
-    const ownColor = gateNode?.color;
+    const overlays = item.overlays ?? [];
+    const overlayMode = overlays.length > 0;
+    const ownColor = item.overlayBaseColor ?? gateNode?.color;
+    const histNBins = 150;
+    const histPlotMin = dataToPlotValue(xLog ? 1 : 0, xLog);
+    const histSpan = dataToPlotValue(xDomainMax, xLog) - histPlotMin || 1;
+
     if (item.plotType === 'histogram' && histogram) {
-      const binWidth = plotWidth / histogram.nBins;
-      ctx.fillStyle = ownColor ?? DEFAULT_HISTOGRAM_COLOR;
-      for (let b = 0; b < histogram.nBins; b++) {
-        const c = histogram.counts[b];
-        if (c === 0) continue;
-        const x = MARGIN.left + b * binWidth;
-        const yTop = toRange(scaleY, c);
-        ctx.fillRect(x, yTop, Math.max(1, binWidth), MARGIN.top + plotHeight - yTop);
+      if (overlayMode) {
+        drawHistogramOutline(ctx, histogram.counts, histogram.nBins, ownColor ?? DEFAULT_HISTOGRAM_COLOR);
+      } else {
+        const binWidth = plotWidth / histogram.nBins;
+        ctx.fillStyle = ownColor ?? DEFAULT_HISTOGRAM_COLOR;
+        for (let b = 0; b < histogram.nBins; b++) {
+          const c = histogram.counts[b];
+          if (c === 0) continue;
+          const x = MARGIN.left + b * binWidth;
+          const yTop = toRange(scaleY, c);
+          ctx.fillRect(x, yTop, Math.max(1, binWidth), MARGIN.top + plotHeight - yTop);
+        }
       }
     } else if (item.plotType === 'scatter' && densityGrid) {
       const xCol = getColumn(sample, item.xParam);
       const yCol = getColumn(sample, item.yParam);
-      if (ownColor) ctx.fillStyle = ownColor;
+      if (ownColor) ctx.fillStyle = overlayMode ? hexToRgba(ownColor, 0.6) : ownColor;
       for (let i = 0; i < indices.length; i++) {
         const idx = indices[i];
         const px = xToPx(xCol[idx]);
@@ -280,6 +314,29 @@ export function LayoutPanel({
           ctx.fillStyle = densityColor(t, item.colormap ?? DEFAULT_COLORMAP);
         }
         ctx.fillRect(px - 1, py - 1, 2, 2);
+      }
+    }
+
+    for (const ov of overlays) {
+      const ovSample = samples.find((s) => s.id === ov.sampleId);
+      if (!ovSample) continue;
+      const xOk = ovSample.paramIndex[item.xParam] !== undefined;
+      const yOk = item.plotType === 'histogram' || ovSample.paramIndex[item.yParam] !== undefined;
+      if (!xOk || !yOk) continue;
+      const ovIndices = getGateEventIndices(ovSample, ov.gateId);
+      if (item.plotType === 'histogram') {
+        const ovCounts = computeHistCounts(getColumn(ovSample, item.xParam), ovIndices, histPlotMin, histSpan, histNBins);
+        drawHistogramOutline(ctx, ovCounts, histNBins, ov.color);
+      } else {
+        const xCol = getColumn(ovSample, item.xParam);
+        const yCol = getColumn(ovSample, item.yParam);
+        ctx.fillStyle = hexToRgba(ov.color, 0.6);
+        for (let i = 0; i < ovIndices.length; i++) {
+          const idx = ovIndices[i];
+          const px = xToPx(xCol[idx]);
+          const py = yToPx(yCol[idx]);
+          ctx.fillRect(px - 1, py - 1, 2, 2);
+        }
       }
     }
 
@@ -306,8 +363,75 @@ export function LayoutPanel({
 
     ctx.restore();
 
+    if (overlayMode) {
+      drawOverlayLegend(ctx, item.label, ownColor ?? DEFAULT_GATE_COLOR, overlays);
+    }
+
     drawStatsAnnotation(ctx);
   });
+
+  function computeHistCounts(col: Float32Array, idxs: Uint32Array, plotMin: number, span: number, nBins: number): Uint32Array {
+    const counts = new Uint32Array(nBins);
+    for (let i = 0; i < idxs.length; i++) {
+      const v = dataToPlotValue(col[idxs[i]], xLog);
+      let bin = Math.floor(((v - plotMin) / span) * nBins);
+      if (bin < 0) bin = 0;
+      if (bin >= nBins) bin = nBins - 1;
+      counts[bin]++;
+    }
+    return counts;
+  }
+
+  function drawHistogramOutline(ctx: CanvasRenderingContext2D, counts: Uint32Array, nBins: number, color: string) {
+    const binWidth = plotWidth / nBins;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(MARGIN.left, MARGIN.top + plotHeight);
+    for (let b = 0; b < nBins; b++) {
+      const x = MARGIN.left + b * binWidth;
+      const y = toRange(scaleY, counts[b]);
+      ctx.lineTo(x, y);
+      ctx.lineTo(x + binWidth, y);
+    }
+    ctx.lineTo(MARGIN.left + plotWidth, MARGIN.top + plotHeight);
+    ctx.stroke();
+  }
+
+  /** Small color-swatch + label key (top-right of the plot) identifying which sample each overlay layer belongs to. */
+  function drawOverlayLegend(ctx: CanvasRenderingContext2D, baseLabel: string, baseColor: string, overlays: LayoutOverlayRef[]) {
+    const rows = [{ label: baseLabel, color: baseColor }, ...overlays.map((o) => ({ label: o.label, color: o.color }))];
+    ctx.font = resolvePanelFont(item.fontFamily, item.fontSize).tickFont;
+    ctx.textAlign = 'left';
+    const swatch = 8;
+    const rowHeight = 13;
+    const padding = 6;
+    const textWidth = Math.max(...rows.map((r) => ctx.measureText(r.label).width));
+    const boxWidth = swatch + 6 + textWidth + padding * 2;
+    const boxHeight = rows.length * rowHeight + padding * 2 - 3;
+    const x = Math.max(MARGIN.left, MARGIN.left + plotWidth - boxWidth - 4);
+    const y = MARGIN.top + 4;
+
+    ctx.fillStyle = 'rgba(10, 11, 15, 0.72)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(x, y, boxWidth, boxHeight, 4);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(x, y, boxWidth, boxHeight);
+      ctx.strokeRect(x, y, boxWidth, boxHeight);
+    }
+    rows.forEach((r, i) => {
+      const rowY = y + padding + i * rowHeight;
+      ctx.fillStyle = r.color;
+      ctx.fillRect(x + padding, rowY + 2, swatch, swatch);
+      ctx.fillStyle = '#e5e7eb';
+      ctx.fillText(r.label, x + padding + swatch + 6, rowY + 9);
+    });
+  }
 
   function drawStatsAnnotation(ctx: CanvasRenderingContext2D) {
     const frac = item.statsAnnotation ?? DEFAULT_STATS_ANNOTATION;
@@ -355,6 +479,7 @@ export function LayoutPanel({
   }
 
   function handleCanvasMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (e.button !== 0) return;
     const px = getMousePx(e);
     if (isInAnnotationBox(px)) {
       setAnnotDrag({ startPx: px, startFrac: item.statsAnnotation ?? DEFAULT_STATS_ANNOTATION });
@@ -371,6 +496,19 @@ export function LayoutPanel({
 
   function handleCanvasMouseUp() {
     setAnnotDrag(null);
+  }
+
+  function handleContextMenu(e: React.MouseEvent) {
+    e.preventDefault();
+    setOverlaySubmenuOpen(false);
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  }
+
+  function toggleOverlay(otherItem: LayoutItem) {
+    const existing = (item.overlays ?? []).find((o) => o.sampleId === otherItem.sampleId && o.gateId === otherItem.gateId);
+    if (existing) removeLayoutOverlay(item.id, existing.id);
+    else addLayoutOverlay(item.id, otherItem.id);
+    setContextMenu(null);
   }
 
   function drawShapeOverlay(
@@ -655,7 +793,7 @@ export function LayoutPanel({
         <span className="event-count">{indices.length.toLocaleString()}</span>
       </div>
       <div className="plot-toolbar">
-        {item.plotType === 'scatter' && (
+        {item.plotType === 'scatter' && !(item.overlays?.length ?? 0) && (
           <label>
             Colors:
             <select
@@ -702,9 +840,55 @@ export function LayoutPanel({
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleCanvasMouseUp}
           onMouseLeave={handleCanvasMouseUp}
+          onContextMenu={handleContextMenu}
           style={{ cursor: annotDrag ? 'grabbing' : 'default' }}
         />
       </div>
+      {contextMenu && (
+        <div ref={contextMenuRef} className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <div className="context-menu-item context-menu-parent" onMouseEnter={() => setOverlaySubmenuOpen(true)}>
+            <span>Overlay</span>
+            <span className="context-menu-arrow">▸</span>
+            {overlaySubmenuOpen && (
+              <div className="context-submenu">
+                {layoutItems.filter((li) => li.id !== item.id).length === 0 ? (
+                  <div className="context-menu-empty">No other panels in the Layout yet.</div>
+                ) : (
+                  layoutItems
+                    .filter((li) => li.id !== item.id)
+                    .map((other) => {
+                      const added = (item.overlays ?? []).some((o) => o.sampleId === other.sampleId && o.gateId === other.gateId);
+                      const otherSampleName = samples.find((s) => s.id === other.sampleId)?.fileName ?? 'removed sample';
+                      return (
+                        <div
+                          key={other.id}
+                          className={`context-menu-item ${added ? 'context-menu-item-active' : ''}`}
+                          onClick={() => toggleOverlay(other)}
+                          title={added ? 'Click to remove this overlay' : 'Click to overlay this panel'}
+                        >
+                          {added ? '✓ ' : ''}
+                          {other.label}
+                          <span className="context-menu-sub"> · {otherSampleName}</span>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+            )}
+          </div>
+          {(item.overlays?.length ?? 0) > 0 && (
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                clearLayoutOverlays(item.id);
+                setContextMenu(null);
+              }}
+            >
+              Clear overlays
+            </div>
+          )}
+        </div>
+      )}
       {sample && statsFields.length > 0 && (
         <div className="layout-stats-block">
           {statsFields.map((key, i) => (

@@ -279,13 +279,19 @@ export function LayoutWorkspace() {
       const showStats = !!sample && statsFields.length > 0;
       const footerHeight = showStats ? EXPORT_STATS_LINE_HEIGHT : 0;
       if (sample) {
+        const resolvedOverlays = (item.overlays ?? [])
+          .map((ov) => {
+            const ovSample = samples.find((s) => s.id === ov.sampleId);
+            return ovSample ? { sample: ovSample, gateId: ov.gateId, label: ov.label, color: ov.color } : null;
+          })
+          .filter((ov): ov is NonNullable<typeof ov> => ov !== null);
         drawPlotPanel(
           ctx,
           item.x,
           item.y + EXPORT_HEADER_HEIGHT,
           item.width,
           item.height - EXPORT_HEADER_HEIGHT - footerHeight,
-          { sample, ...item },
+          { sample, ...item, overlays: resolvedOverlays, baseLabel: item.label },
           theme
         );
       }

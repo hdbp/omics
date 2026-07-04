@@ -23,6 +23,23 @@ export const STATS_FIELD_LABELS: Record<StatsFieldKey, string> = {
 };
 
 /**
+ * A snapshot reference to another sample's population, drawn as an extra flat-colored
+ * layer on top of a Layout panel's own plot (same axes) so two samples can be
+ * contrasted on one plot. Captured by value (sampleId/gateId/label) rather than a
+ * live link to the other Layout item, so it keeps working even if that item is later
+ * removed or relabeled.
+ */
+export interface LayoutOverlayRef {
+  id: string;
+  sampleId: string;
+  gateId: string;
+  /** The other panel's label at the time it was added, shown in this panel's legend. */
+  label: string;
+  /** Flat color for this layer; auto-picked to differ from every other layer already in this panel's overlay. */
+  color: string;
+}
+
+/**
  * A single plot in a sample's workspace. Each panel is permanently bound to
  * one population (gateId) with its own axes/scale/plot type — mirroring
  * FlowJo's layout of linked plots rather than one plot that swaps in place.
@@ -87,6 +104,10 @@ export interface LayoutItem {
   fontFamily?: string;
   /** Base font size (px) for axis labels; ticks/quadrant/annotation text render 1px smaller. Unset = 11. */
   fontSize?: number;
+  /** Other samples' populations drawn on top of this panel's own plot (same axes), for contrasting samples. */
+  overlays?: LayoutOverlayRef[];
+  /** Flat color for this panel's own layer, assigned once it has its first overlay so its density heatmap doesn't visually clash with the overlays' flat colors. Unset (no overlays) keeps the normal density/colormap rendering. */
+  overlayBaseColor?: string;
   x: number;
   y: number;
   width: number;

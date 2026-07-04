@@ -15,9 +15,10 @@ import {
   MIN_PANEL_WIDTH,
   MIN_PANEL_HEIGHT,
 } from './panelLayout';
-import type { Sample, Panel, LayoutItem, StatsFieldKey } from './types';
+import type { Sample, Panel, LayoutItem, LayoutOverlayRef, StatsFieldKey } from './types';
 import type { FCSParameter } from '../fcs/types';
 import type { ColormapId } from '../utils/colormap';
+import { pickOverlayColor } from '../utils/overlayColors';
 
 const QUADRANT_IDS: QuadrantId[] = ['UL', 'UR', 'LL', 'LR'];
 
@@ -182,6 +183,10 @@ interface AppState {
   removeLayoutItem: (itemId: string) => void;
   autoArrangeLayout: () => void;
   focusLayoutItem: (itemId: string | null) => void;
+  /** Draws another Layout item's population on top of this one (same axes), in its own flat color, for contrasting samples. No-op if already added. */
+  addLayoutOverlay: (baseItemId: string, otherItemId: string) => void;
+  removeLayoutOverlay: (baseItemId: string, overlayRefId: string) => void;
+  clearLayoutOverlays: (baseItemId: string) => void;
 
   /** Wholesale-replaces the workspace with a project restored from a saved .fcsproj file. */
   loadProject: (project: {
@@ -665,6 +670,45 @@ export const useStore = create<AppState>((set, get) => ({
     }),
 
   focusLayoutItem: (itemId) => set({ focusedLayoutItemId: itemId }),
+
+  addLayoutOverlay: (baseItemId, otherItemId) =>
+    set((state) => {
+      const other = state.layoutItems.find((it) => it.id === otherItemId);
+      if (!other) return state;
+      return {
+        layoutItems: state.layoutItems.map((it) => {
+          if (it.id !== baseItemId) return it;
+          const overlays = it.overlays ?? [];
+          const alreadyAdded = overlays.some((o) => o.sampleId === other.sampleId && o.gateId === other.gateId);
+          if (alreadyAdded) return it;
+          const baseColor = it.overlayBaseColor ?? pickOverlayColor(overlays.map((o) => o.color));
+          const newRef: LayoutOverlayRef = {
+            id: makeId('overlay'),
+            sampleId: other.sampleId,
+            gateId: other.gateId,
+            label: other.label,
+            color: pickOverlayColor([baseColor, ...overlays.map((o) => o.color)]),
+          };
+          return { ...it, overlayBaseColor: baseColor, overlays: [...overlays, newRef] };
+        }),
+      };
+    }),
+
+  removeLayoutOverlay: (baseItemId, overlayRefId) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) => {
+        if (it.id !== baseItemId) return it;
+        const overlays = (it.overlays ?? []).filter((o) => o.id !== overlayRefId);
+        return overlays.length > 0 ? { ...it, overlays } : { ...it, overlays: undefined, overlayBaseColor: undefined };
+      }),
+    })),
+
+  clearLayoutOverlays: (baseItemId) =>
+    set((state) => ({
+      layoutItems: state.layoutItems.map((it) =>
+        it.id === baseItemId ? { ...it, overlays: undefined, overlayBaseColor: undefined } : it
+      ),
+    })),
 
   loadProject: ({ samples, layoutItems, activeSampleId, mainView, notebookText }) =>
     set({

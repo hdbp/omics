@@ -28,6 +28,7 @@ A lightweight, standalone viewer for flow cytometry `.fcs` files that mimics Flo
 - **Choose the density pseudocolor palette** — a **Colors** dropdown on every dot-plot panel (sample workspace, Layout, and baked into PNG export) switches the density heatmap between Rainbow (the default FlowJo-style jet palette), Viridis, Plasma, Fire, and Grayscale. Set independently per panel; carried over to the Layout and to "Apply gating strategy to other samples."
 - **Format panel fonts** — **Font** and **Size** controls on every panel change the typeface (System UI, Arial, Georgia, Times New Roman, Courier New, or Verdana) and size (8–20px) used for axis labels, tick numbers, gate/quadrant labels, and the stats annotation — live in the workspace, the Layout, and PNG export. Set independently per panel; carried over to the Layout and to "Apply gating strategy to other samples."
 - **A Notebook for notes about the assay** — a "Notebook" section in the sidebar opens a full-width, free-text notes area (protocol, panel/antibody design, compensation notes, run deviations, anything worth remembering) shared across the whole project rather than tied to one sample. Saved and restored with **Save Project…**/**Open Project…** like everything else.
+- **Overlay panels to contrast samples (Layout only)** — right-click a Layout panel's plot to open a context menu, hover **Overlay ▸** for a submenu listing every other panel currently in the Layout, and click one to draw that panel's population on top of this one, on the same axes. Click an already-added entry again (shown with a ✓) to remove just that overlay, or use **Clear overlays** to remove them all. Overlaid samples always render in flat, automatically-distinct colors (never each other's pseudocolor density gradient, which would be meaningless once multiple samples share a plot and could make different samples look confusingly similar) — a small legend in the corner of the plot shows which color belongs to which sample. Works for both dot plots (semi-transparent flat-colored points) and histograms (outlined, not filled, so overlapping distributions stay readable). Baked into PNG/PDF/PowerPoint export in either theme.
 
 Not included in this version: compensation/spillover matrices and full biexponential/logicle transforms — the log option is a straight log10 (floored at 1), not FlowJo's logicle.
 
@@ -109,6 +110,7 @@ Google Drive and OneDrive aren't wired up yet; Dropbox was the simplest to start
 20. On any dot-plot panel, use the **Colors** dropdown to switch the density heatmap palette (Rainbow/Viridis/Plasma/Fire/Grayscale) — set per panel, carried over to the Layout and PNG export.
 21. Use the **Font** dropdown and **Size** field on any panel to change the typeface and size used for axis labels, tick numbers, and gate/stats text — set per panel, carried over to the Layout and PNG export.
 22. Click **View Notebook →** in the sidebar's **Notebook** section to open a full-width notes area — jot down anything about the assay (panel design, compensation, deviations); it's shared across all loaded samples, previewed in the sidebar, and saved/restored with the project file.
+23. In the Layout, right-click any panel's plot to open its context menu, hover **Overlay ▸**, and click another panel from the list to draw that panel's sample on top of this one (same axes) in its own flat color — useful for contrasting two samples (e.g. control vs. treated) on one plot. Click a checked entry again to remove it, or **Clear overlays** to remove all of them; a legend in the corner shows which color is which sample.
 
 ## Project layout
 
@@ -140,7 +142,7 @@ src/
 │   ├── GatePanel.tsx       A single plot panel: axes, custom axis labels, log toggle, gate drawing/editing/coloring, inline rename, drill-down-to-new-panel
 │   ├── LayoutSidebar.tsx   Sidebar section listing Layout items + the samples/layout view switcher
 │   ├── LayoutWorkspace.tsx The Layout collage canvas: grid arrangement, drag/resize, multi-select + align/distribute + snap guides, stats CSV + light/dark PNG export
-│   ├── LayoutPanel.tsx     A read-only-for-gating plot in the Layout (editable axes/custom axis labels/log/label/position/size)
+│   ├── LayoutPanel.tsx     A read-only-for-gating plot in the Layout (editable axes/custom axis labels/log/label/position/size); right-click context menu for overlaying other panels' samples
 │   ├── StatsTable.tsx      Whole-sample statistics table + CSV export
 │   ├── Notebook.tsx        Full-width free-text notes area for the whole project (assay/protocol notes)
 │   ├── NotebookSidebar.tsx Sidebar section: notes preview + the samples/notebook view switcher
@@ -149,6 +151,7 @@ src/
 └── utils/
     ├── scale.ts           Linear/log10 domain↔pixel scaling, tick generation
     ├── colormap.ts        Pseudocolor density gradients (Rainbow/Viridis/Plasma/Fire/Grayscale)
+    ├── overlayColors.ts    Fixed distinguishable flat-color palette for overlaying samples in the Layout
     ├── fonts.ts            Shared font-family/size options + label/tick font resolution for panels
     ├── csv.ts             CSV download helper
     ├── exportImage.ts     PNG layout export helper

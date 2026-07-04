@@ -27,6 +27,14 @@ function formatTick(v: number): string {
   return `${Math.round(v)}`;
 }
 
+/** A resolved overlay layer (its Sample object already looked up), for drawing another sample's population on top of the base plot. */
+export interface ResolvedOverlay {
+  sample: Sample;
+  gateId: string;
+  label: string;
+  color: string;
+}
+
 /** Everything a Panel or a LayoutItem carries that's needed to re-render its plot; both types satisfy this shape. */
 export interface PlotRenderSpec {
   sample: Sample;
@@ -42,6 +50,12 @@ export interface PlotRenderSpec {
   colormap?: ColormapId;
   fontFamily?: string;
   fontSize?: number;
+  /** Other samples' populations to draw on top of this one (same axes), each in its own flat color. */
+  overlays?: ResolvedOverlay[];
+  /** Flat color for the base sample's own layer once overlays are present (set alongside overlays). */
+  overlayBaseColor?: string;
+  /** Label for the base sample's own layer, shown in the legend when overlays are present. */
+  baseLabel?: string;
 }
 
 /**
@@ -78,21 +92,13 @@ export function drawPlotPanel(
 
   const scaleX: LinearScale = makeScale(dataToPlotValue(xLog ? 1 : 0, xLog), dataToPlotValue(xDomainMax, xLog), left, left + plotWidth);
 
+  const nBins = 150;
+  const xPlotMinForHist = dataToPlotValue(xLog ? 1 : 0, xLog);
+  const xSpanForHist = dataToPlotValue(xDomainMax, xLog) - xPlotMinForHist || 1;
+
   let histogram: { counts: Uint32Array; nBins: number; max: number } | null = null;
   if (plotType === 'histogram') {
-    const nBins = 150;
-    const col = getColumn(sample, xParam);
-    const plotMin = dataToPlotValue(xLog ? 1 : 0, xLog);
-    const plotMax = dataToPlotValue(xDomainMax, xLog);
-    const span = plotMax - plotMin || 1;
-    const counts = new Uint32Array(nBins);
-    for (let i = 0; i < indices.length; i++) {
-      const v = dataToPlotValue(col[indices[i]], xLog);
-      let bin = Math.floor(((v - plotMin) / span) * nBins);
-      if (bin < 0) bin = 0;
-      if (bin >= nBins) bin = nBins - 1;
-      counts[bin]++;
-    }
+    const counts = computeHistCounts(getColumn(sample, xParam), indices, xLog, xPlotMinForHist, xSpanForHist, nBins);
     let max = 1;
     for (let b = 0; b < nBins; b++) if (counts[b] > max) max = counts[b];
     histogram = { counts, nBins, max };
@@ -177,21 +183,27 @@ export function drawPlotPanel(
   ctx.rect(left, top, plotWidth, plotHeight);
   ctx.clip();
 
-  const ownColor = gateNode?.color;
+  const overlays = spec.overlays ?? [];
+  const overlayMode = overlays.length > 0;
+  const ownColor = spec.overlayBaseColor ?? gateNode?.color;
   if (plotType === 'histogram' && histogram) {
-    const binWidth = plotWidth / histogram.nBins;
-    ctx.fillStyle = ownColor ?? theme.defaultHistogramColor;
-    for (let b = 0; b < histogram.nBins; b++) {
-      const c = histogram.counts[b];
-      if (c === 0) continue;
-      const x = left + b * binWidth;
-      const yTop = toRange(scaleY, c);
-      ctx.fillRect(x, yTop, Math.max(1, binWidth), top + plotHeight - yTop);
+    if (overlayMode) {
+      drawHistogramOutline(ctx, histogram.counts, histogram.nBins, scaleY, left, plotWidth, top, plotHeight, ownColor ?? theme.defaultHistogramColor);
+    } else {
+      const binWidth = plotWidth / histogram.nBins;
+      ctx.fillStyle = ownColor ?? theme.defaultHistogramColor;
+      for (let b = 0; b < histogram.nBins; b++) {
+        const c = histogram.counts[b];
+        if (c === 0) continue;
+        const x = left + b * binWidth;
+        const yTop = toRange(scaleY, c);
+        ctx.fillRect(x, yTop, Math.max(1, binWidth), top + plotHeight - yTop);
+      }
     }
   } else if (plotType === 'scatter' && densityGrid) {
     const xCol = getColumn(sample, xParam);
     const yCol = getColumn(sample, yParam);
-    if (ownColor) ctx.fillStyle = ownColor;
+    if (ownColor) ctx.fillStyle = overlayMode ? hexToRgba(ownColor, 0.6) : ownColor;
     for (let i = 0; i < indices.length; i++) {
       const idx = indices[i];
       const px = xToPx(xCol[idx]);
@@ -202,6 +214,27 @@ export function drawPlotPanel(
         ctx.fillStyle = densityColor(t, spec.colormap ?? DEFAULT_COLORMAP);
       }
       ctx.fillRect(px - 1, py - 1, 2, 2);
+    }
+  }
+
+  for (const ov of overlays) {
+    const xOk = ov.sample.paramIndex[xParam] !== undefined;
+    const yOk = plotType === 'histogram' || ov.sample.paramIndex[yParam] !== undefined;
+    if (!xOk || !yOk) continue;
+    const ovIndices = getGateEventIndices(ov.sample, ov.gateId);
+    if (plotType === 'histogram') {
+      const ovCounts = computeHistCounts(getColumn(ov.sample, xParam), ovIndices, xLog, xPlotMinForHist, xSpanForHist, nBins);
+      drawHistogramOutline(ctx, ovCounts, nBins, scaleY, left, plotWidth, top, plotHeight, ov.color);
+    } else {
+      const xCol = getColumn(ov.sample, xParam);
+      const yCol = getColumn(ov.sample, yParam);
+      ctx.fillStyle = hexToRgba(ov.color, 0.6);
+      for (let i = 0; i < ovIndices.length; i++) {
+        const idx = ovIndices[i];
+        const px = xToPx(xCol[idx]);
+        const py = yToPx(yCol[idx]);
+        ctx.fillRect(px - 1, py - 1, 2, 2);
+      }
     }
   }
 
@@ -223,7 +256,103 @@ export function drawPlotPanel(
 
   ctx.restore();
 
+  if (overlayMode) {
+    drawOverlayLegend(ctx, left, top, plotWidth, spec.baseLabel ?? 'This panel', ownColor ?? theme.defaultGateColor, overlays, theme, tickFont);
+  }
+
   drawStatsAnnotation(ctx, left, top, plotWidth, plotHeight, spec.statsAnnotation, gateNode, indices, sample, theme, tickFont);
+}
+
+/** Bins already-log/linear-transformed event values into `nBins` histogram counts over [plotMin, plotMin+span). */
+function computeHistCounts(
+  col: Float32Array,
+  indices: Uint32Array,
+  xLog: boolean,
+  plotMin: number,
+  span: number,
+  nBins: number
+): Uint32Array {
+  const counts = new Uint32Array(nBins);
+  for (let i = 0; i < indices.length; i++) {
+    const v = dataToPlotValue(col[indices[i]], xLog);
+    let bin = Math.floor(((v - plotMin) / span) * nBins);
+    if (bin < 0) bin = 0;
+    if (bin >= nBins) bin = nBins - 1;
+    counts[bin]++;
+  }
+  return counts;
+}
+
+/** Draws a histogram as a stepped outline (no fill) rather than solid bars, so multiple overlaid samples' histograms stay individually readable. */
+function drawHistogramOutline(
+  ctx: CanvasRenderingContext2D,
+  counts: Uint32Array,
+  nBins: number,
+  scaleY: LinearScale,
+  left: number,
+  plotWidth: number,
+  top: number,
+  plotHeight: number,
+  color: string
+): void {
+  const binWidth = plotWidth / nBins;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(left, top + plotHeight);
+  for (let b = 0; b < nBins; b++) {
+    const x = left + b * binWidth;
+    const y = toRange(scaleY, counts[b]);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x + binWidth, y);
+  }
+  ctx.lineTo(left + plotWidth, top + plotHeight);
+  ctx.stroke();
+}
+
+/** Small color-swatch + label key (top-right of the plot) identifying which sample each overlay layer belongs to. */
+function drawOverlayLegend(
+  ctx: CanvasRenderingContext2D,
+  left: number,
+  top: number,
+  plotWidth: number,
+  baseLabel: string,
+  baseColor: string,
+  overlays: ResolvedOverlay[],
+  theme: PlotTheme,
+  font: string
+): void {
+  const rows = [{ label: baseLabel, color: baseColor }, ...overlays.map((o) => ({ label: o.label, color: o.color }))];
+  ctx.font = font;
+  ctx.textAlign = 'left';
+  const swatch = 8;
+  const rowHeight = 13;
+  const padding = 6;
+  const textWidth = Math.max(...rows.map((r) => ctx.measureText(r.label).width));
+  const boxWidth = swatch + 6 + textWidth + padding * 2;
+  const boxHeight = rows.length * rowHeight + padding * 2 - 3;
+  const x = Math.max(left, left + plotWidth - boxWidth - 4);
+  const y = top + 4;
+
+  ctx.fillStyle = theme.annotationBg;
+  ctx.strokeStyle = theme.annotationBorder;
+  ctx.lineWidth = 1;
+  if (typeof ctx.roundRect === 'function') {
+    ctx.beginPath();
+    ctx.roundRect(x, y, boxWidth, boxHeight, 4);
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.fillRect(x, y, boxWidth, boxHeight);
+    ctx.strokeRect(x, y, boxWidth, boxHeight);
+  }
+  rows.forEach((r, i) => {
+    const rowY = y + padding + i * rowHeight;
+    ctx.fillStyle = r.color;
+    ctx.fillRect(x + padding, rowY + 2, swatch, swatch);
+    ctx.fillStyle = theme.annotationText;
+    ctx.fillText(r.label, x + padding + swatch + 6, rowY + 9);
+  });
 }
 
 function drawShapeOverlay(
