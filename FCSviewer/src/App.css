@@ -241,6 +241,30 @@
   flex-wrap: wrap;
 }
 
+/* Drag handle between the panel workspace and the statistics table, so the workspace can
+   reclaim vertical space (e.g. to reach a tall panel's own resize handle) without needing
+   the statistics table to give up its default share first. */
+.main-splitter {
+  flex: 0 0 14px;
+  cursor: row-resize;
+  position: relative;
+}
+.main-splitter::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: #3a3f4b;
+  transition: background 0.15s;
+}
+.main-splitter:hover::after {
+  background: #4f8dff;
+}
+
 /* Panel workspace (the multi-plot canvas that replaces a single plot view) */
 .panel-workspace-wrap {
   display: flex;
@@ -392,7 +416,8 @@
   color: #ff6b6b;
 }
 .gate-panel-close,
-.gate-panel-layout-btn {
+.gate-panel-layout-btn,
+.gate-panel-reset-size-btn {
   background: none;
   border: none;
   color: #8b93a1;
@@ -405,7 +430,8 @@
 .gate-panel-close:hover {
   color: #ff6b6b;
 }
-.gate-panel-layout-btn:hover {
+.gate-panel-layout-btn:hover,
+.gate-panel-reset-size-btn:hover {
   color: #4f8dff;
 }
 .layout-panel-missing {

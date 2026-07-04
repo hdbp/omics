@@ -1,10 +1,20 @@
-import { useState } from 'react';
+import { useState, type CSSProperties, type Ref } from 'react';
 import { getColumn, type Sample } from '../state/types';
 import type { GateStat } from '../gating/gateStats';
 import { medianForParam } from '../gating/gateStats';
 import { downloadCsv } from '../utils/csv';
 
-export function StatsTable({ sample, stats }: { sample: Sample; stats: GateStat[] }) {
+export function StatsTable({
+  sample,
+  stats,
+  style,
+  ref,
+}: {
+  sample: Sample;
+  stats: GateStat[];
+  style?: CSSProperties;
+  ref?: Ref<HTMLDivElement>;
+}) {
   const [xLabel, setXLabel] = useState(sample.parameters[0]?.name ?? '');
   const [yLabel, setYLabel] = useState(sample.parameters[1]?.name ?? sample.parameters[0]?.name ?? '');
 
@@ -40,7 +50,7 @@ export function StatsTable({ sample, stats }: { sample: Sample; stats: GateStat[
   const params = sample.parameters;
 
   return (
-    <div className="stats-table-panel">
+    <div className="stats-table-panel" style={style} ref={ref}>
       <div className="panel-title-row">
         <div className="panel-title">Statistics</div>
         <div className="stats-controls">

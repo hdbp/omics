@@ -810,6 +810,14 @@ export function LayoutPanel({
             {item.label}
           </span>
         )}
+        <button
+          className="gate-panel-reset-size-btn"
+          title="Reset this panel to its default size (also reachable by double-clicking its resize handle)"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => resizeLayoutItem(item.id, DEFAULT_PANEL_WIDTH, DEFAULT_PANEL_HEIGHT)}
+        >
+          ↺
+        </button>
         <button className="gate-panel-close" title="Remove from layout" onMouseDown={(e) => e.stopPropagation()} onClick={() => removeLayoutItem(item.id)}>
           ×
         </button>

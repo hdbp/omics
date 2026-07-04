@@ -1287,6 +1287,14 @@ export function GatePanel({
           </span>
         )}
         <button
+          className="gate-panel-reset-size-btn"
+          title="Reset this panel to its default size (also reachable by double-clicking its resize handle)"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => resizePanel(sample.id, panel.id, DEFAULT_PANEL_WIDTH, DEFAULT_PANEL_HEIGHT)}
+        >
+          ↺
+        </button>
+        <button
           className="gate-panel-layout-btn"
           title="Add this panel to the Layout collage"
           onMouseDown={(e) => e.stopPropagation()}

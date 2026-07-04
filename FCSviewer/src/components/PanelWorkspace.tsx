@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useStore } from '../state/store';
 import type { Sample } from '../state/types';
 import { ancestorChain } from '../gating/gateEval';
@@ -26,7 +26,7 @@ interface ResizeState {
   origHeight: number;
 }
 
-export function PanelWorkspace({ sample }: { sample: Sample }) {
+export function PanelWorkspace({ sample, style }: { sample: Sample; style?: CSSProperties }) {
   const { movePanel, resizePanel, autoArrangePanels, focusedPanelId, focusPanel } = useStore();
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
@@ -160,7 +160,7 @@ export function PanelWorkspace({ sample }: { sample: Sample }) {
   }
 
   return (
-    <div className="panel-workspace-wrap">
+    <div className="panel-workspace-wrap" style={style}>
       <div className="panel-workspace-toolbar">
         <span className="workspace-title">
           {sample.fileName} · {sample.panels.length} panel{sample.panels.length === 1 ? '' : 's'}
