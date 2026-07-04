@@ -6,6 +6,7 @@ import { makeScale, toRange, niceTicks, logTicks, dataToPlotValue, type LinearSc
 import { densityColor, hexToRgba, DEFAULT_COLORMAP, type ColormapId } from './colormap';
 import { resolvePanelFont } from './fonts';
 import type { PlotTheme } from './theme';
+import { evaluateG1, evaluateG2, evaluateS, evaluateTotal, type CellCycleAnalysis } from '../gating/cellCycle';
 
 const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
 const QUADRANT_LABEL_OFFSET = 6;
@@ -56,6 +57,8 @@ export interface PlotRenderSpec {
   overlayBaseColor?: string;
   /** Label for the base sample's own layer, shown in the legend when overlays are present. */
   baseLabel?: string;
+  /** Cell-cycle (DNA content) analysis to overlay, if any. */
+  cellCycle?: CellCycleAnalysis;
 }
 
 /**
@@ -254,13 +257,142 @@ export function drawPlotPanel(
     }
   }
 
+  drawCellCycleCurves(ctx, spec.cellCycle, xDomainMax, xToPx, scaleY);
+
   ctx.restore();
 
   if (overlayMode) {
     drawOverlayLegend(ctx, left, top, plotWidth, spec.baseLabel ?? 'This panel', ownColor ?? theme.defaultGateColor, overlays, theme, tickFont);
   }
+  drawCellCycleOverlay(ctx, spec.cellCycle, xToPx, top, plotHeight, left, plotWidth, xDomainMax, histogram, theme, tickFont);
 
   drawStatsAnnotation(ctx, left, top, plotWidth, plotHeight, spec.statsAnnotation, gateNode, indices, sample, theme, tickFont);
+}
+
+/** Fitted G1/S/G2M model curves (auto-fit mode), drawn inside the existing plot clip region. */
+function drawCellCycleCurves(
+  ctx: CanvasRenderingContext2D,
+  cellCycle: CellCycleAnalysis | undefined,
+  xDomainMax: number,
+  xToPx: (raw: number) => number,
+  scaleY: LinearScale
+): void {
+  if (!cellCycle?.fit) return;
+  const { params } = cellCycle.fit;
+  const steps = 200;
+  const curve = (fn: (x: number, p: typeof params) => number, color: string) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const x = (i / steps) * xDomainMax;
+      const px = xToPx(x);
+      const py = toRange(scaleY, fn(x, params));
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  };
+  curve(evaluateG1, '#4f8dff');
+  curve(evaluateG2, '#ff5c8a');
+  curve(evaluateS, '#2ee6a6');
+  curve(evaluateTotal, '#e5e7eb');
+}
+
+/** Manual boundary lines (unclipped, so they can span the full plot height) and the %G1/%S/%G2M or auto-fit stats box. */
+function drawCellCycleOverlay(
+  ctx: CanvasRenderingContext2D,
+  cellCycle: CellCycleAnalysis | undefined,
+  xToPx: (raw: number) => number,
+  top: number,
+  plotHeight: number,
+  left: number,
+  plotWidth: number,
+  xDomainMax: number,
+  histogram: { counts: Uint32Array; nBins: number; max: number } | null,
+  theme: PlotTheme,
+  font: string
+): void {
+  if (!cellCycle) return;
+  if (cellCycle.method === 'manual' && cellCycle.boundaries) {
+    const g1sPx = xToPx(cellCycle.boundaries.g1s);
+    const sg2mPx = xToPx(cellCycle.boundaries.sg2m);
+    ctx.save();
+    ctx.strokeStyle = '#ffd166';
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1.5;
+    for (const px of [g1sPx, sg2mPx]) {
+      ctx.beginPath();
+      ctx.moveTo(px, top);
+      ctx.lineTo(px, top + plotHeight);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    if (!histogram) return;
+    let g1 = 0;
+    let s = 0;
+    let g2 = 0;
+    const binWidth = xDomainMax / histogram.nBins || 1;
+    for (let b = 0; b < histogram.nBins; b++) {
+      const x = (b + 0.5) * binWidth;
+      const c = histogram.counts[b];
+      if (x < cellCycle.boundaries.g1s) g1 += c;
+      else if (x < cellCycle.boundaries.sg2m) s += c;
+      else g2 += c;
+    }
+    const total = g1 + s + g2 || 1;
+    drawCellCycleStatsBox(ctx, left, top, plotWidth, theme, font, [
+      `G1 ${((g1 / total) * 100).toFixed(1)}%`,
+      `S ${((s / total) * 100).toFixed(1)}%`,
+      `G2/M ${((g2 / total) * 100).toFixed(1)}%`,
+    ]);
+  } else if (cellCycle.method === 'auto' && cellCycle.fit) {
+    const { fit } = cellCycle;
+    drawCellCycleStatsBox(ctx, left, top, plotWidth, theme, font, [
+      `G1 ${(fit.g1Fraction * 100).toFixed(1)}%  ·  CV ${fit.g1CV.toFixed(1)}%`,
+      `S ${(fit.sFraction * 100).toFixed(1)}%`,
+      `G2/M ${(fit.g2Fraction * 100).toFixed(1)}%`,
+      `G2/G1 ${fit.g2g1Ratio.toFixed(2)}  ·  RCS ${fit.rcs.toFixed(2)}`,
+    ]);
+  }
+}
+
+function drawCellCycleStatsBox(
+  ctx: CanvasRenderingContext2D,
+  left: number,
+  top: number,
+  plotWidth: number,
+  theme: PlotTheme,
+  font: string,
+  lines: string[]
+): void {
+  ctx.font = font;
+  ctx.textAlign = 'left';
+  const padding = 6;
+  const lineHeight = 13;
+  const textWidth = Math.max(...lines.map((l) => ctx.measureText(l).width));
+  const boxWidth = textWidth + padding * 2;
+  const boxHeight = lines.length * lineHeight + padding * 2 - 3;
+  const x = Math.max(left, left + plotWidth - boxWidth - 4);
+  const y = top + 4;
+  ctx.fillStyle = theme.annotationBg;
+  ctx.strokeStyle = theme.annotationBorder;
+  ctx.lineWidth = 1;
+  if (typeof ctx.roundRect === 'function') {
+    ctx.beginPath();
+    ctx.roundRect(x, y, boxWidth, boxHeight, 4);
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.fillRect(x, y, boxWidth, boxHeight);
+    ctx.strokeRect(x, y, boxWidth, boxHeight);
+  }
+  ctx.fillStyle = theme.annotationText;
+  lines.forEach((line, i) => {
+    ctx.fillText(line, x + padding, y + padding + 9 + i * lineHeight);
+  });
 }
 
 /** Bins already-log/linear-transformed event values into `nBins` histogram counts over [plotMin, plotMin+span). */

@@ -19,6 +19,7 @@ import type { Sample, Panel, LayoutItem, LayoutOverlayRef, StatsFieldKey } from 
 import type { FCSParameter } from '../fcs/types';
 import type { ColormapId } from '../utils/colormap';
 import { pickOverlayColor } from '../utils/overlayColors';
+import type { CellCycleAnalysis } from '../gating/cellCycle';
 
 const QUADRANT_IDS: QuadrantId[] = ['UL', 'UR', 'LL', 'LR'];
 
@@ -140,6 +141,10 @@ interface AppState {
   updatePanelColormap: (sampleId: string, panelId: string, colormap: ColormapId | null) => void;
   /** Font family/size for all text on a panel's canvas; pass null to revert to the default. */
   updatePanelFont: (sampleId: string, panelId: string, fontFamily: string | null, fontSize: number | null) => void;
+  /** Sets/clears a panel's cell-cycle analysis (manual boundaries or an auto-fit result). Pass null to remove it. */
+  updatePanelCellCycle: (sampleId: string, panelId: string, analysis: CellCycleAnalysis | null) => void;
+  /** Creates the G1/S/G2M gates (adjacent range gates) from a panel's manual cell-cycle boundaries. */
+  addCellCycleGates: (sampleId: string, parentId: string, xParam: string, xDomainMax: number, g1s: number, sg2m: number) => void;
   movePanel: (sampleId: string, panelId: string, x: number, y: number) => void;
   resizePanel: (sampleId: string, panelId: string, width: number, height: number) => void;
   removePanel: (sampleId: string, panelId: string) => void;
@@ -331,6 +336,34 @@ export const useStore = create<AppState>((set, get) => ({
           p.id === panelId ? { ...p, fontFamily: fontFamily ?? undefined, fontSize: fontSize ?? undefined } : p
         ),
       })),
+    })),
+
+  updatePanelCellCycle: (sampleId, panelId, analysis) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => ({
+        ...s,
+        panels: s.panels.map((p) => (p.id === panelId ? { ...p, cellCycle: analysis ?? undefined } : p)),
+      })),
+    })),
+
+  addCellCycleGates: (sampleId, parentId, xParam, xDomainMax, g1s, sg2m) =>
+    set((state) => ({
+      samples: updateSample(state.samples, sampleId, (s) => {
+        const gates = { ...s.gates };
+        const phases: [string, number, number][] = [
+          ['G1', 0, g1s],
+          ['S', g1s, sg2m],
+          ['G2/M', sg2m, xDomainMax],
+        ];
+        const newIds: string[] = [];
+        for (const [name, min, max] of phases) {
+          const gateId = makeId('gate');
+          gates[gateId] = { id: gateId, name, parentId, shape: { kind: 'range', param: xParam, min, max }, childIds: [] };
+          newIds.push(gateId);
+        }
+        gates[parentId] = { ...gates[parentId], childIds: [...gates[parentId].childIds, ...newIds] };
+        return { ...s, gates };
+      }),
     })),
 
   movePanel: (sampleId, panelId, x, y) =>
@@ -589,6 +622,7 @@ export const useStore = create<AppState>((set, get) => ({
         colormap: panel.colormap,
         fontFamily: panel.fontFamily,
         fontSize: panel.fontSize,
+        cellCycle: panel.cellCycle,
         x: pos.x,
         y: pos.y,
         width: panel.width,

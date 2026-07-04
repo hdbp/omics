@@ -18,9 +18,25 @@ import {
 import { densityColor, hexToRgba, COLORMAP_IDS, COLORMAP_LABELS, DEFAULT_COLORMAP, type ColormapId } from '../utils/colormap';
 import { FONT_FAMILY_OPTIONS, MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_FONT_SIZE, resolvePanelFont } from '../utils/fonts';
 import { marchingSquares, findLoopContainingPoint } from '../gating/contour';
+import {
+  fitCellCycle,
+  seedCellCyclePeaks,
+  evaluateG1,
+  evaluateG2,
+  evaluateS,
+  evaluateTotal,
+  type CellCycleMethod,
+} from '../gating/cellCycle';
 import { GateNameDialog } from './GateNameDialog';
 
-type Mode = 'none' | 'rectangle' | 'polygon' | 'range' | 'quadrant' | 'contour';
+type Mode = 'none' | 'rectangle' | 'polygon' | 'range' | 'quadrant' | 'contour' | 'cellcycle';
+
+const CELL_CYCLE_NBINS = 150;
+const CELL_CYCLE_G1_COLOR = '#4f8dff';
+const CELL_CYCLE_G2_COLOR = '#ff5c8a';
+const CELL_CYCLE_S_COLOR = '#2ee6a6';
+const CELL_CYCLE_TOTAL_COLOR = '#e5e7eb';
+const CELL_CYCLE_BOUNDARY_COLOR = '#ffd166';
 
 const DEFAULT_CONTOUR_THRESHOLD_PCT = 20;
 const MIN_CONTOUR_THRESHOLD_PCT = 2;
@@ -154,6 +170,8 @@ export function GatePanel({
     updatePanelStatsAnnotationPos,
     updatePanelColormap,
     updatePanelFont,
+    updatePanelCellCycle,
+    addCellCycleGates,
   } = useStore();
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -177,6 +195,9 @@ export function GatePanel({
   const [contourThresholdPct, setContourThresholdPct] = useState(DEFAULT_CONTOUR_THRESHOLD_PCT);
   const [contourPreviewPoints, setContourPreviewPoints] = useState<Point[] | null>(null);
   const lastCursorDataRef = useRef<Point | null>(null);
+  const [cellCycleUIMethod, setCellCycleUIMethod] = useState<CellCycleMethod>('manual');
+  const [manualBoundaries, setManualBoundaries] = useState<{ g1s: number; sg2m: number } | null>(null);
+  const [boundaryDragKey, setBoundaryDragKey] = useState<'g1s' | 'sg2m' | null>(null);
 
   const xLog = panel.xLogScale;
   const yLog = panel.plotType === 'scatter' && panel.yLogScale;
@@ -211,6 +232,7 @@ export function GatePanel({
         setPendingShape(null);
         setDrawing(false);
         setContourPreviewPoints(null);
+        setBoundaryDragKey(null);
       }
       if (e.key === 'Enter' && mode === 'polygon' && polyPoints.length >= 3) {
         setPendingShape({ kind: 'polygon', xParam: panel.xParam, yParam: panel.yParam, points: polyPoints });
@@ -220,7 +242,9 @@ export function GatePanel({
     return () => window.removeEventListener('keydown', onKey);
   }, [mode, polyPoints, panel.xParam, panel.yParam]);
 
-  // Reset any in-progress draw when the axes, plot type, or scale change.
+  // Reset any in-progress draw when the axes, plot type, or scale change. Cell-cycle
+  // analysis is tied to one specific histogram parameter, so it's cleared too rather
+  // than risk showing a stale fit/boundaries for a different axis.
   useEffect(() => {
     setMode('none');
     setRectDraft(null);
@@ -232,6 +256,12 @@ export function GatePanel({
     setPendingShape(null);
     setDrawing(false);
     setContourPreviewPoints(null);
+    setBoundaryDragKey(null);
+    setManualBoundaries(null);
+    if (panel.cellCycle) updatePanelCellCycle(sample.id, panel.id, null);
+    // Deliberately axis/scale-only deps: this must NOT re-run when panel.cellCycle itself changes
+    // (e.g. right after a fit completes), only on real axis changes.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [panel.xParam, panel.yParam, panel.plotType, xLog, yLog]);
 
   // Distinct quadrant-gate groups (crosshair placements) among this panel's own child gates,
@@ -283,6 +313,26 @@ export function GatePanel({
     for (let b = 0; b < nBins; b++) if (counts[b] > max) max = counts[b];
     return { counts, nBins, max };
   }, [sample, panel.plotType, panel.xParam, indices, xDomainMax, xLog]);
+
+  // Cell-cycle analysis always bins on a *linear* DNA-content domain regardless of the
+  // panel's own xLog display toggle, since the Watson-style model assumes G2/M sits at
+  // exactly 2x the G1 channel — a relationship that only holds on a linear axis.
+  const cellCycleHistogram = useMemo(() => {
+    if (panel.plotType !== 'histogram') return null;
+    const col = getColumn(sample, panel.xParam);
+    const binWidth = xDomainMax / CELL_CYCLE_NBINS || 1;
+    const counts = new Uint32Array(CELL_CYCLE_NBINS);
+    for (let i = 0; i < indices.length; i++) {
+      const v = col[indices[i]];
+      let bin = Math.floor(v / binWidth);
+      if (bin < 0) bin = 0;
+      if (bin >= CELL_CYCLE_NBINS) bin = CELL_CYCLE_NBINS - 1;
+      counts[bin]++;
+    }
+    const binCenters = new Float64Array(CELL_CYCLE_NBINS);
+    for (let b = 0; b < CELL_CYCLE_NBINS; b++) binCenters[b] = (b + 0.5) * binWidth;
+    return { counts, binCenters, binWidth };
+  }, [sample, panel.plotType, panel.xParam, indices, xDomainMax]);
 
   const scaleY: LinearScale = useMemo(() => {
     if (panel.plotType === 'histogram') {
@@ -498,8 +548,11 @@ export function GatePanel({
       }
     }
 
+    drawCellCycleCurves(ctx);
+
     ctx.restore();
 
+    drawCellCycleHandlesAndStats(ctx);
     drawStatsAnnotation(ctx);
   });
 
@@ -685,6 +738,176 @@ export function GatePanel({
     }
   }
 
+  /** Sums the linear-domain cell-cycle histogram into %G1/%S/%G2M for a manual boundary pair. */
+  function computeManualPercents(boundaries: { g1s: number; sg2m: number }): { g1Pct: number; sPct: number; g2Pct: number } {
+    if (!cellCycleHistogram) return { g1Pct: 0, sPct: 0, g2Pct: 0 };
+    const { counts, binCenters } = cellCycleHistogram;
+    let g1 = 0;
+    let s = 0;
+    let g2 = 0;
+    for (let b = 0; b < counts.length; b++) {
+      const x = binCenters[b];
+      const c = counts[b];
+      if (x < boundaries.g1s) g1 += c;
+      else if (x < boundaries.sg2m) s += c;
+      else g2 += c;
+    }
+    const total = g1 + s + g2 || 1;
+    return { g1Pct: (g1 / total) * 100, sPct: (s / total) * 100, g2Pct: (g2 / total) * 100 };
+  }
+
+  /** A reasonable starting placement for the two manual boundaries: an S-phase window centered between the seeded G1/G2M peaks. */
+  function computeDefaultManualBoundaries(): { g1s: number; sg2m: number } | null {
+    if (!cellCycleHistogram) return null;
+    const seed = seedCellCyclePeaks(cellCycleHistogram.counts);
+    const g1x = cellCycleHistogram.binCenters[seed.g1Bin];
+    const g2x = cellCycleHistogram.binCenters[seed.g2Bin];
+    const mid = (g1x + g2x) / 2;
+    const quarter = Math.max((g2x - g1x) / 4, cellCycleHistogram.binWidth);
+    return { g1s: Math.max(0, mid - quarter), sg2m: Math.min(xDomainMax, mid + quarter) };
+  }
+
+  function toggleCellCycleMode() {
+    if (mode === 'cellcycle') {
+      setMode('none');
+      return;
+    }
+    setMode('cellcycle');
+    const existing = panel.cellCycle;
+    const uiMethod = existing?.method ?? 'manual';
+    setCellCycleUIMethod(uiMethod);
+    if (uiMethod === 'manual') {
+      const boundaries = existing?.boundaries ?? computeDefaultManualBoundaries();
+      setManualBoundaries(boundaries);
+      if (boundaries && !existing?.boundaries) {
+        updatePanelCellCycle(sample.id, panel.id, { method: 'manual', boundaries });
+      }
+    }
+  }
+
+  function selectCellCycleMethod(method: CellCycleMethod) {
+    setCellCycleUIMethod(method);
+    if (method === 'manual' && !manualBoundaries) {
+      const boundaries = panel.cellCycle?.boundaries ?? computeDefaultManualBoundaries();
+      setManualBoundaries(boundaries);
+      if (boundaries) updatePanelCellCycle(sample.id, panel.id, { method: 'manual', boundaries });
+    }
+  }
+
+  function runCellCycleFit() {
+    if (!cellCycleHistogram) return;
+    const seed = seedCellCyclePeaks(cellCycleHistogram.counts);
+    const fit = fitCellCycle(cellCycleHistogram.counts, cellCycleHistogram.binCenters, seed);
+    updatePanelCellCycle(sample.id, panel.id, { method: 'auto', fit });
+  }
+
+  function createCellCycleGatesFromBoundaries() {
+    if (!manualBoundaries) return;
+    addCellCycleGates(sample.id, panel.gateId, panel.xParam, xDomainMax, manualBoundaries.g1s, manualBoundaries.sg2m);
+  }
+
+  function clearCellCycleAnalysis() {
+    updatePanelCellCycle(sample.id, panel.id, null);
+    setManualBoundaries(null);
+    setMode('none');
+  }
+
+  function drawCellCycleStatsBox(ctx: CanvasRenderingContext2D, lines: string[]) {
+    ctx.font = resolvePanelFont(panel.fontFamily, panel.fontSize).tickFont;
+    ctx.textAlign = 'left';
+    const padding = 6;
+    const lineHeight = 13;
+    const textWidth = Math.max(...lines.map((l) => ctx.measureText(l).width));
+    const boxWidth = textWidth + padding * 2;
+    const boxHeight = lines.length * lineHeight + padding * 2 - 3;
+    const x = Math.max(MARGIN.left, MARGIN.left + plotWidth - boxWidth - 4);
+    const y = MARGIN.top + 4;
+    ctx.fillStyle = 'rgba(10, 11, 15, 0.72)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(x, y, boxWidth, boxHeight, 4);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(x, y, boxWidth, boxHeight);
+      ctx.strokeRect(x, y, boxWidth, boxHeight);
+    }
+    ctx.fillStyle = '#e5e7eb';
+    lines.forEach((line, i) => {
+      ctx.fillText(line, x + padding, y + padding + 9 + i * lineHeight);
+    });
+  }
+
+  /** Draws the fitted G1/S/G2M model curves, clipped to the plot area (called inside the existing clip region). */
+  function drawCellCycleCurves(ctx: CanvasRenderingContext2D) {
+    const cc = panel.cellCycle;
+    if (!cc?.fit || panel.plotType !== 'histogram') return;
+    const { params } = cc.fit;
+    const steps = 200;
+    const curve = (fn: (x: number, p: typeof params) => number, color: string) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 0; i <= steps; i++) {
+        const x = (i / steps) * xDomainMax;
+        const px = xToPx(x);
+        const py = toRange(scaleY, fn(x, params));
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    };
+    curve(evaluateG1, CELL_CYCLE_G1_COLOR);
+    curve(evaluateG2, CELL_CYCLE_G2_COLOR);
+    curve(evaluateS, CELL_CYCLE_S_COLOR);
+    curve(evaluateTotal, CELL_CYCLE_TOTAL_COLOR);
+  }
+
+  /** Draws the manual boundary lines/handles and the stats box (called outside the plot's clip region, so handles can poke above the frame). */
+  function drawCellCycleHandlesAndStats(ctx: CanvasRenderingContext2D) {
+    const cc = panel.cellCycle;
+    if (!cc || panel.plotType !== 'histogram') return;
+    if (cc.method === 'manual' && cc.boundaries) {
+      const g1sPx = xToPx(cc.boundaries.g1s);
+      const sg2mPx = xToPx(cc.boundaries.sg2m);
+      ctx.save();
+      ctx.strokeStyle = CELL_CYCLE_BOUNDARY_COLOR;
+      ctx.setLineDash([4, 3]);
+      ctx.lineWidth = 1.5;
+      for (const px of [g1sPx, sg2mPx]) {
+        ctx.beginPath();
+        ctx.moveTo(px, MARGIN.top);
+        ctx.lineTo(px, MARGIN.top + plotHeight);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      if (mode === 'cellcycle' && cellCycleUIMethod === 'manual') {
+        for (const px of [g1sPx, sg2mPx]) {
+          ctx.beginPath();
+          ctx.moveTo(px - 5, MARGIN.top - 8);
+          ctx.lineTo(px + 5, MARGIN.top - 8);
+          ctx.lineTo(px, MARGIN.top + 2);
+          ctx.closePath();
+          ctx.fillStyle = CELL_CYCLE_BOUNDARY_COLOR;
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+      const pct = computeManualPercents(cc.boundaries);
+      drawCellCycleStatsBox(ctx, [`G1 ${pct.g1Pct.toFixed(1)}%`, `S ${pct.sPct.toFixed(1)}%`, `G2/M ${pct.g2Pct.toFixed(1)}%`]);
+    } else if (cc.method === 'auto' && cc.fit) {
+      const { fit } = cc;
+      drawCellCycleStatsBox(ctx, [
+        `G1 ${(fit.g1Fraction * 100).toFixed(1)}%  ·  CV ${fit.g1CV.toFixed(1)}%`,
+        `S ${(fit.sFraction * 100).toFixed(1)}%`,
+        `G2/M ${(fit.g2Fraction * 100).toFixed(1)}%`,
+        `G2/G1 ${fit.g2g1Ratio.toFixed(2)}  ·  RCS ${fit.rcs.toFixed(2)}`,
+      ]);
+    }
+  }
+
   function getMouseData(e: React.MouseEvent<HTMLCanvasElement>): Point {
     const rect = canvasRef.current!.getBoundingClientRect();
     const px = e.clientX - rect.left;
@@ -801,6 +1024,12 @@ export function GatePanel({
       if (contourPreviewPoints && contourPreviewPoints.length >= 3) {
         setPendingShape({ kind: 'polygon', xParam: panel.xParam, yParam: panel.yParam, points: contourPreviewPoints });
       }
+    } else if (mode === 'cellcycle' && cellCycleUIMethod === 'manual' && manualBoundaries) {
+      const px = getMousePx(e);
+      const g1sPx = xToPx(manualBoundaries.g1s);
+      const sg2mPx = xToPx(manualBoundaries.sg2m);
+      if (Math.abs(px.x - g1sPx) <= CLOSE_RADIUS_PX) setBoundaryDragKey('g1s');
+      else if (Math.abs(px.x - sg2mPx) <= CLOSE_RADIUS_PX) setBoundaryDragKey('sg2m');
     }
   }
 
@@ -869,6 +1098,16 @@ export function GatePanel({
       if (!shapeDrag.moved) setShapeDrag({ ...shapeDrag, moved: true });
       return;
     }
+    if (boundaryDragKey && manualBoundaries) {
+      const data = getMouseData(e);
+      const x = Math.max(0, Math.min(xDomainMax, data.x));
+      const next = { ...manualBoundaries };
+      if (boundaryDragKey === 'g1s') next.g1s = Math.min(x, next.sg2m - 1e-6);
+      else next.sg2m = Math.max(x, next.g1s + 1e-6);
+      setManualBoundaries(next);
+      updatePanelCellCycle(sample.id, panel.id, { method: 'manual', boundaries: next });
+      return;
+    }
     if (mode === 'polygon' && polyPoints.length > 0) {
       setCursorData(getMouseData(e));
     }
@@ -903,6 +1142,11 @@ export function GatePanel({
     if (shapeDrag) {
       if (shapeDrag.moved) suppressNextClick.current = true;
       setShapeDrag(null);
+      return;
+    }
+    if (boundaryDragKey) {
+      setBoundaryDragKey(null);
+      suppressNextClick.current = true;
       return;
     }
     if (!drawing) return;
@@ -1160,12 +1404,21 @@ export function GatePanel({
               </button>
             </>
           ) : (
-            <button
-              className={`btn btn-small ${mode === 'range' ? 'btn-active' : ''}`}
-              onClick={() => setMode(mode === 'range' ? 'none' : 'range')}
-            >
-              ↔
-            </button>
+            <>
+              <button
+                className={`btn btn-small ${mode === 'range' ? 'btn-active' : ''}`}
+                onClick={() => setMode(mode === 'range' ? 'none' : 'range')}
+              >
+                ↔
+              </button>
+              <button
+                className={`btn btn-small ${mode === 'cellcycle' ? 'btn-active' : ''}`}
+                title="Cell cycle analysis: place manual G1/S/G2M boundaries or auto-fit a Watson-style model to this DNA-content histogram"
+                onClick={toggleCellCycleMode}
+              >
+                Cell cycle
+              </button>
+            </>
           )}
           {mode !== 'none' && (
             <button
@@ -1177,6 +1430,7 @@ export function GatePanel({
                 setPolyPoints([]);
                 setQuadrantDraft(null);
                 setContourPreviewPoints(null);
+                setBoundaryDragKey(null);
               }}
             >
               Cancel
@@ -1226,6 +1480,38 @@ export function GatePanel({
           />
         </label>
       </div>
+      {mode === 'cellcycle' && (
+        <div className="plot-toolbar">
+          <div className="btn-group">
+            <button
+              className={`btn btn-small ${cellCycleUIMethod === 'manual' ? 'btn-active' : ''}`}
+              onClick={() => selectCellCycleMethod('manual')}
+            >
+              Manual
+            </button>
+            <button
+              className={`btn btn-small ${cellCycleUIMethod === 'auto' ? 'btn-active' : ''}`}
+              onClick={() => selectCellCycleMethod('auto')}
+            >
+              Auto-fit
+            </button>
+          </div>
+          {cellCycleUIMethod === 'manual' ? (
+            <button className="btn btn-small" onClick={createCellCycleGatesFromBoundaries} disabled={!manualBoundaries}>
+              Create gates
+            </button>
+          ) : (
+            <button className="btn btn-small" onClick={runCellCycleFit}>
+              {panel.cellCycle?.method === 'auto' && panel.cellCycle.fit ? 'Re-run fit' : 'Run fit'}
+            </button>
+          )}
+          {panel.cellCycle && (
+            <button className="btn btn-small" onClick={clearCellCycleAnalysis}>
+              Clear
+            </button>
+          )}
+        </div>
+      )}
       {mode === 'polygon' && (
         <div className="hint">Click vertices; click near the first, dbl-click, or Enter to close.</div>
       )}
@@ -1233,6 +1519,18 @@ export function GatePanel({
       {mode === 'contour' && (
         <div className="hint">
           Hover a density region to preview its contour; scroll to adjust sensitivity ({contourThresholdPct}%); click to create the gate.
+        </div>
+      )}
+      {mode === 'cellcycle' && cellCycleUIMethod === 'manual' && (
+        <div className="hint">
+          Drag the two markers above the plot to set the G1/S and S/G2M boundaries, then click "Create gates" to turn them into 3 real
+          gates (G1, S, G2/M).
+        </div>
+      )}
+      {mode === 'cellcycle' && cellCycleUIMethod === 'auto' && (
+        <div className="hint">
+          Click "Run fit" to fit a Watson-style model (G1 + G2/M Gaussians, G2/M at 2x the G1 mean, plus an S-phase bridge) to this
+          histogram. Assumes a linear-scale DNA-content axis.
         </div>
       )}
       {mode === 'none' && quadrantGroups.size > 0 && (

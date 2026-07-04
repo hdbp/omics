@@ -7,6 +7,7 @@ import type { GateShape, QuadrantId } from '../gating/gateTypes';
 import { makeScale, toRange, niceTicks, logTicks, dataToPlotValue, type LinearScale } from '../utils/scale';
 import { densityColor, hexToRgba, COLORMAP_IDS, COLORMAP_LABELS, DEFAULT_COLORMAP, type ColormapId } from '../utils/colormap';
 import { FONT_FAMILY_OPTIONS, MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_FONT_SIZE, resolvePanelFont } from '../utils/fonts';
+import { evaluateG1, evaluateG2, evaluateS, evaluateTotal } from '../gating/cellCycle';
 
 const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
 const QUADRANT_LABEL_OFFSET = 6;
@@ -361,14 +362,120 @@ export function LayoutPanel({
       }
     }
 
+    drawCellCycleCurves(ctx);
+
     ctx.restore();
 
     if (overlayMode) {
       drawOverlayLegend(ctx, item.label, ownColor ?? DEFAULT_GATE_COLOR, overlays);
     }
+    drawCellCycleOverlay(ctx);
 
     drawStatsAnnotation(ctx);
   });
+
+  /** Fitted G1/S/G2M model curves (auto-fit mode), drawn inside the existing plot clip region. */
+  function drawCellCycleCurves(ctx: CanvasRenderingContext2D) {
+    const cc = item.cellCycle;
+    if (!cc?.fit || item.plotType !== 'histogram') return;
+    const { params } = cc.fit;
+    const steps = 200;
+    const curve = (fn: (x: number, p: typeof params) => number, color: string) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 0; i <= steps; i++) {
+        const x = (i / steps) * xDomainMax;
+        const px = xToPx(x);
+        const py = toRange(scaleY, fn(x, params));
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    };
+    curve(evaluateG1, '#4f8dff');
+    curve(evaluateG2, '#ff5c8a');
+    curve(evaluateS, '#2ee6a6');
+    curve(evaluateTotal, '#e5e7eb');
+  }
+
+  /** Manual boundary lines (no drag handles — read-only in the Layout) and the %G1/%S/%G2M or auto-fit stats box. */
+  function drawCellCycleOverlay(ctx: CanvasRenderingContext2D) {
+    const cc = item.cellCycle;
+    if (!cc || item.plotType !== 'histogram') return;
+    const font = resolvePanelFont(item.fontFamily, item.fontSize).tickFont;
+    if (cc.method === 'manual' && cc.boundaries) {
+      const g1sPx = xToPx(cc.boundaries.g1s);
+      const sg2mPx = xToPx(cc.boundaries.sg2m);
+      ctx.save();
+      ctx.strokeStyle = '#ffd166';
+      ctx.setLineDash([4, 3]);
+      ctx.lineWidth = 1.5;
+      for (const px of [g1sPx, sg2mPx]) {
+        ctx.beginPath();
+        ctx.moveTo(px, MARGIN.top);
+        ctx.lineTo(px, MARGIN.top + plotHeight);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      if (!histogram) return;
+      let g1 = 0;
+      let s = 0;
+      let g2 = 0;
+      const binWidth = xDomainMax / histogram.nBins || 1;
+      for (let b = 0; b < histogram.nBins; b++) {
+        const x = (b + 0.5) * binWidth;
+        const c = histogram.counts[b];
+        if (x < cc.boundaries.g1s) g1 += c;
+        else if (x < cc.boundaries.sg2m) s += c;
+        else g2 += c;
+      }
+      const total = g1 + s + g2 || 1;
+      drawCellCycleStatsBox(ctx, font, [
+        `G1 ${((g1 / total) * 100).toFixed(1)}%`,
+        `S ${((s / total) * 100).toFixed(1)}%`,
+        `G2/M ${((g2 / total) * 100).toFixed(1)}%`,
+      ]);
+    } else if (cc.method === 'auto' && cc.fit) {
+      const { fit } = cc;
+      drawCellCycleStatsBox(ctx, font, [
+        `G1 ${(fit.g1Fraction * 100).toFixed(1)}%  ·  CV ${fit.g1CV.toFixed(1)}%`,
+        `S ${(fit.sFraction * 100).toFixed(1)}%`,
+        `G2/M ${(fit.g2Fraction * 100).toFixed(1)}%`,
+        `G2/G1 ${fit.g2g1Ratio.toFixed(2)}  ·  RCS ${fit.rcs.toFixed(2)}`,
+      ]);
+    }
+  }
+
+  function drawCellCycleStatsBox(ctx: CanvasRenderingContext2D, font: string, lines: string[]) {
+    ctx.font = font;
+    ctx.textAlign = 'left';
+    const padding = 6;
+    const lineHeight = 13;
+    const textWidth = Math.max(...lines.map((l) => ctx.measureText(l).width));
+    const boxWidth = textWidth + padding * 2;
+    const boxHeight = lines.length * lineHeight + padding * 2 - 3;
+    const x = Math.max(MARGIN.left, MARGIN.left + plotWidth - boxWidth - 4);
+    const y = MARGIN.top + 4;
+    ctx.fillStyle = 'rgba(10, 11, 15, 0.72)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(x, y, boxWidth, boxHeight, 4);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(x, y, boxWidth, boxHeight);
+      ctx.strokeRect(x, y, boxWidth, boxHeight);
+    }
+    ctx.fillStyle = '#e5e7eb';
+    lines.forEach((line, i) => {
+      ctx.fillText(line, x + padding, y + padding + 9 + i * lineHeight);
+    });
+  }
 
   function computeHistCounts(col: Float32Array, idxs: Uint32Array, plotMin: number, span: number, nBins: number): Uint32Array {
     const counts = new Uint32Array(nBins);

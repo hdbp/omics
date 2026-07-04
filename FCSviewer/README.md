@@ -29,6 +29,11 @@ A lightweight, standalone viewer for flow cytometry `.fcs` files that mimics Flo
 - **Format panel fonts** — **Font** and **Size** controls on every panel change the typeface (System UI, Arial, Georgia, Times New Roman, Courier New, or Verdana) and size (8–20px) used for axis labels, tick numbers, gate/quadrant labels, and the stats annotation — live in the workspace, the Layout, and PNG export. Set independently per panel; carried over to the Layout and to "Apply gating strategy to other samples."
 - **A Notebook for notes about the assay** — a "Notebook" section in the sidebar opens a full-width, free-text notes area (protocol, panel/antibody design, compensation notes, run deviations, anything worth remembering) shared across the whole project rather than tied to one sample. Saved and restored with **Save Project…**/**Open Project…** like everything else.
 - **Overlay panels to contrast samples (Layout only)** — right-click a Layout panel's plot to open a context menu, hover **Overlay ▸** for a submenu listing every other panel currently in the Layout, and click one to draw that panel's population on top of this one, on the same axes. Click an already-added entry again (shown with a ✓) to remove just that overlay, or use **Clear overlays** to remove them all. Overlaid samples always render in flat, automatically-distinct colors (never each other's pseudocolor density gradient, which would be meaningless once multiple samples share a plot and could make different samples look confusingly similar) — a small legend in the corner of the plot shows which color belongs to which sample. Works for both dot plots (semi-transparent flat-colored points) and histograms (outlined, not filled, so overlapping distributions stay readable). Baked into PNG/PDF/PowerPoint export in either theme.
+- **Cell cycle analysis** — click **Cell cycle** on a histogram panel (a linear-scale DNA-content channel, e.g. PI/DAPI/Hoechst area) to bring up two ways to break it into G1/S/G2M, matching how FlowJo's own cell-cycle platform works conceptually:
+  - **Manual** — drag the two markers above the plot to set the G1/S and S/G2M boundaries by eye; a live %G1/%S/%G2M readout updates as you drag, and **Create gates** turns the three regions into ordinary range gates (named G1/S/G2M) that drill down, export, and save/load exactly like any other gate.
+  - **Auto-fit** — click **Run fit** to fit a simplified Watson-pragmatic-style model: G1 and G2/M as Gaussians (G2/M mean constrained to exactly 2x the G1 mean, the classic diploid assumption), plus a single Gaussian-broadened "bridge" for S-phase (a common simplification of FlowJo's full Dean-Jett-Fox polynomial model). Reports %G1/%S/%G2M, G1 CV%, the G2/G1 ratio (should read ≈2.0), and RCS (reduced chi-square fit quality), and draws the fitted curves over the histogram.
+  
+  Peak-seeding and the fit itself run entirely client-side (a small hand-rolled Nelder-Mead least-squares optimizer — no numeric-library dependency). The saved analysis (whichever method you used) is read-only-displayed in the Layout and baked into PNG/PDF/PowerPoint export in either theme, same as everything else. Switching the histogram's parameter, plot type, or log scale clears the analysis, since it's tied to one specific linear-scale axis.
 
 Not included in this version: compensation/spillover matrices and full biexponential/logicle transforms — the log option is a straight log10 (floored at 1), not FlowJo's logicle.
 
@@ -111,6 +116,7 @@ Google Drive and OneDrive aren't wired up yet; Dropbox was the simplest to start
 21. Use the **Font** dropdown and **Size** field on any panel to change the typeface and size used for axis labels, tick numbers, and gate/stats text — set per panel, carried over to the Layout and PNG export.
 22. Click **View Notebook →** in the sidebar's **Notebook** section to open a full-width notes area — jot down anything about the assay (panel design, compensation, deviations); it's shared across all loaded samples, previewed in the sidebar, and saved/restored with the project file.
 23. In the Layout, right-click any panel's plot to open its context menu, hover **Overlay ▸**, and click another panel from the list to draw that panel's sample on top of this one (same axes) in its own flat color — useful for contrasting two samples (e.g. control vs. treated) on one plot. Click a checked entry again to remove it, or **Clear overlays** to remove all of them; a legend in the corner shows which color is which sample.
+24. On a histogram panel (a linear-scale DNA-content channel), click **Cell cycle**, pick **Manual** to drag the two boundary markers and click **Create gates** for real G1/S/G2M gates, or pick **Auto-fit** and click **Run fit** for a Watson-style model fit with %G1/%S/%G2M, G1 CV%, G2/G1 ratio, and fit-quality stats drawn over the histogram. Click **Clear** to remove it. Changing the panel's parameter, plot type, or log scale clears the analysis.
 
 ## Project layout
 
@@ -124,7 +130,8 @@ src/
 │   ├── gateEval.ts       Point-in-gate tests, ancestor-chain evaluation
 │   ├── gateStats.ts      Per-gate count/%/median statistics; shared formatting for the Layout stats block/CSV/PNG export; per-quadrant stats grouping
 │   ├── gateClone.ts      Clones a gate hierarchy (+ id map, colors) onto another sample's parameters
-│   └── contour.ts        Marching-squares density contour tracing + point-in-polygon, for the contour gate tool
+│   ├── contour.ts        Marching-squares density contour tracing + point-in-polygon, for the contour gate tool
+│   └── cellCycle.ts      Cell-cycle model (G1/G2M Gaussians + S-phase bridge), peak seeding, and the Nelder-Mead fit
 ├── state/
 │   ├── store.ts          zustand store: samples, gate trees, panels, Layout collage, UI selection
 │   ├── panelLayout.ts    Panel sizing constants + size-aware auto-layout (tree + grid) algorithms
@@ -159,7 +166,8 @@ src/
     ├── theme.ts            Light/dark color palettes for PNG export
     ├── plotRender.ts       Re-renders a panel's plot onto an export canvas in either theme, independent of the live (always-dark) DOM canvas
     ├── download.ts         Shared Blob-download helper
-    └── id.ts               Shared unique-id generator
+    ├── id.ts               Shared unique-id generator
+    └── numeric.ts          erf() approximation + a compact Nelder-Mead simplex optimizer, for cell-cycle fitting
 
 src-tauri/                  Native desktop wrapper (Tauri) — config + a few lines of Rust; loads dist/ into an OS webview
 ├── tauri.conf.json         Window size, bundle targets (dmg/app/deb/appimage), icons, product metadata

@@ -1,6 +1,7 @@
 import type { FCSParameter } from '../fcs/types';
 import type { GateNode } from '../gating/gateTypes';
 import type { ColormapId } from '../utils/colormap';
+import type { CellCycleAnalysis } from '../gating/cellCycle';
 
 /** Fractional (0-1) position of a draggable on-canvas annotation, relative to the plot area (not the whole panel). */
 export interface AnnotationPos {
@@ -66,6 +67,8 @@ export interface Panel {
   fontFamily?: string;
   /** Base font size (px) for axis labels; ticks/quadrant/annotation text render 1px smaller. Unset = 11. */
   fontSize?: number;
+  /** Cell-cycle (DNA content) analysis set up for this histogram, if any. */
+  cellCycle?: CellCycleAnalysis;
   /** Position within the sample's workspace canvas, in px. */
   x: number;
   y: number;
@@ -108,6 +111,8 @@ export interface LayoutItem {
   overlays?: LayoutOverlayRef[];
   /** Flat color for this panel's own layer, assigned once it has its first overlay so its density heatmap doesn't visually clash with the overlays' flat colors. Unset (no overlays) keeps the normal density/colormap rendering. */
   overlayBaseColor?: string;
+  /** Cell-cycle (DNA content) analysis set up for this histogram, if any (copied from the source panel when added to the Layout). */
+  cellCycle?: CellCycleAnalysis;
   x: number;
   y: number;
   width: number;
