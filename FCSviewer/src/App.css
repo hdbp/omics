@@ -240,6 +240,19 @@
 .project-controls .btn-group {
   flex-wrap: wrap;
 }
+.recent-projects {
+  margin-top: 10px;
+}
+.recent-project-item .gate-name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.3;
+}
+.recent-project-meta {
+  font-size: 10.5px;
+  color: #6b7280;
+}
 
 /* Drag handle between the panel workspace and the statistics table, so the workspace can
    reclaim vertical space (e.g. to reach a tall panel's own resize handle) without needing
