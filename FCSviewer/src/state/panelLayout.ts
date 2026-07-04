@@ -4,6 +4,11 @@ export const DEFAULT_PANEL_WIDTH = 380;
 export const DEFAULT_PANEL_HEIGHT = 360;
 export const MIN_PANEL_WIDTH = 260;
 export const MIN_PANEL_HEIGHT = 220;
+// Capped so a panel's own resize handle can never be dragged so far that it ends up
+// scrolled out of reach of its workspace's viewport (double-click the handle also
+// resets a panel back to the default size, as a second way out).
+export const MAX_PANEL_WIDTH = 900;
+export const MAX_PANEL_HEIGHT = 750;
 export const GAP_X = 70;
 export const GAP_Y = 28;
 export const PADDING = 24;

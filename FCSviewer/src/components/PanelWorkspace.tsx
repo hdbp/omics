@@ -3,7 +3,7 @@ import { useStore } from '../state/store';
 import type { Sample } from '../state/types';
 import { ancestorChain } from '../gating/gateEval';
 import { GatePanel } from './GatePanel';
-import { PADDING, MIN_PANEL_WIDTH, MIN_PANEL_HEIGHT } from '../state/panelLayout';
+import { PADDING, MIN_PANEL_WIDTH, MIN_PANEL_HEIGHT, MAX_PANEL_WIDTH, MAX_PANEL_HEIGHT } from '../state/panelLayout';
 import { downloadCanvasAsPng, truncateText } from '../utils/exportImage';
 import { drawPlotPanel } from '../utils/plotRender';
 import { getExportTheme, type ExportThemeName } from '../utils/theme';
@@ -66,8 +66,8 @@ export function PanelWorkspace({ sample }: { sample: Sample }) {
       resizePanel(
         sample.id,
         resizeState.panelId,
-        Math.max(MIN_PANEL_WIDTH, resizeState.origWidth + dx),
-        Math.max(MIN_PANEL_HEIGHT, resizeState.origHeight + dy)
+        Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, resizeState.origWidth + dx)),
+        Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, resizeState.origHeight + dy))
       );
     }
     function onUp() {

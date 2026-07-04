@@ -28,6 +28,7 @@ import {
   type CellCycleMethod,
 } from '../gating/cellCycle';
 import { GateNameDialog } from './GateNameDialog';
+import { DEFAULT_PANEL_WIDTH, DEFAULT_PANEL_HEIGHT } from '../state/panelLayout';
 
 type Mode = 'none' | 'rectangle' | 'polygon' | 'range' | 'quadrant' | 'contour' | 'cellcycle';
 
@@ -172,6 +173,7 @@ export function GatePanel({
     updatePanelFont,
     updatePanelCellCycle,
     addCellCycleGates,
+    resizePanel,
   } = useStore();
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1564,7 +1566,15 @@ export function GatePanel({
           onCancel={() => setPendingShape(null)}
         />
       )}
-      <div className="gate-panel-resize-handle" title="Drag to resize" onMouseDown={onResizeHandleDown} />
+      <div
+        className="gate-panel-resize-handle"
+        title="Drag to resize; double-click to reset to the default size"
+        onMouseDown={onResizeHandleDown}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          resizePanel(sample.id, panel.id, DEFAULT_PANEL_WIDTH, DEFAULT_PANEL_HEIGHT);
+        }}
+      />
     </div>
   );
 }

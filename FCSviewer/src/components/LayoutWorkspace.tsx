@@ -3,7 +3,7 @@ import { useStore } from '../state/store';
 import { ancestorChain } from '../gating/gateEval';
 import { computeLayoutItemStats, formatStatsField } from '../gating/gateStats';
 import { LayoutPanel } from './LayoutPanel';
-import { PADDING, MIN_PANEL_WIDTH, MIN_PANEL_HEIGHT } from '../state/panelLayout';
+import { PADDING, MIN_PANEL_WIDTH, MIN_PANEL_HEIGHT, MAX_PANEL_WIDTH, MAX_PANEL_HEIGHT } from '../state/panelLayout';
 import { downloadCanvasAsPng, truncateText } from '../utils/exportImage';
 import { downloadCanvasAsPdf, downloadCanvasAsPptx } from '../utils/exportDoc';
 import { downloadCsv } from '../utils/csv';
@@ -158,8 +158,8 @@ export function LayoutWorkspace() {
       const dy = e.clientY - resizeState.startY;
       resizeLayoutItem(
         resizeState.itemId,
-        Math.max(MIN_PANEL_WIDTH, resizeState.origWidth + dx),
-        Math.max(MIN_PANEL_HEIGHT, resizeState.origHeight + dy)
+        Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, resizeState.origWidth + dx)),
+        Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, resizeState.origHeight + dy))
       );
     }
     function onUp() {

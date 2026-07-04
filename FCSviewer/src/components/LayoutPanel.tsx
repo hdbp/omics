@@ -8,6 +8,7 @@ import { makeScale, toRange, niceTicks, logTicks, dataToPlotValue, type LinearSc
 import { densityColor, hexToRgba, COLORMAP_IDS, COLORMAP_LABELS, DEFAULT_COLORMAP, type ColormapId } from '../utils/colormap';
 import { FONT_FAMILY_OPTIONS, MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_FONT_SIZE, resolvePanelFont } from '../utils/fonts';
 import { evaluateG1, evaluateG2, evaluateS, evaluateTotal } from '../gating/cellCycle';
+import { DEFAULT_PANEL_WIDTH, DEFAULT_PANEL_HEIGHT } from '../state/panelLayout';
 
 const MARGIN = { top: 16, right: 20, bottom: 42, left: 58 };
 const QUADRANT_LABEL_OFFSET = 6;
@@ -67,6 +68,7 @@ export function LayoutPanel({
     updateLayoutItemFont,
     relabelLayoutItem,
     removeLayoutItem,
+    resizeLayoutItem,
     addLayoutOverlay,
     removeLayoutOverlay,
     clearLayoutOverlays,
@@ -747,7 +749,15 @@ export function LayoutPanel({
           </button>
         </div>
         <div className="layout-panel-missing">Source sample was removed.</div>
-        <div className="gate-panel-resize-handle" onMouseDown={onResizeHandleDown} />
+        <div
+          className="gate-panel-resize-handle"
+          title="Drag to resize; double-click to reset to the default size"
+          onMouseDown={onResizeHandleDown}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            resizeLayoutItem(item.id, DEFAULT_PANEL_WIDTH, DEFAULT_PANEL_HEIGHT);
+          }}
+        />
       </div>
     );
   }
@@ -1007,7 +1017,15 @@ export function LayoutPanel({
           ))}
         </div>
       )}
-      <div className="gate-panel-resize-handle" title="Drag to resize" onMouseDown={onResizeHandleDown} />
+      <div
+        className="gate-panel-resize-handle"
+        title="Drag to resize; double-click to reset to the default size"
+        onMouseDown={onResizeHandleDown}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          resizeLayoutItem(item.id, DEFAULT_PANEL_WIDTH, DEFAULT_PANEL_HEIGHT);
+        }}
+      />
     </div>
   );
 }
