@@ -268,7 +268,7 @@ export const useStore = create<AppState>((set, get) => ({
       return { samples, activeSampleId, layoutItems };
     }),
 
-  selectSample: (sampleId) => set({ activeSampleId: sampleId }),
+  selectSample: (sampleId) => set({ activeSampleId: sampleId, mainView: 'samples' }),
 
   updatePanelAxis: (sampleId, panelId, axis, value) =>
     set((state) => ({
