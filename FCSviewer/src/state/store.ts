@@ -544,7 +544,7 @@ export const useStore = create<AppState>((set, get) => ({
     set((state) => ({
       samples: state.samples.map((s) => {
         if (!targetSampleIds.includes(s.id)) return s;
-        const { gates, skipped, idMap } = cloneGateTree(source.gates, s.paramIndex);
+        const { gates, skipped, idMap } = cloneGateTree(source.gates, s.paramIndex, s.gates);
         if (skipped.length > 0) {
           noticeLines.push(`${targetNames.get(s.id) ?? s.id}: skipped ${skipped.join(', ')} (parameter not found)`);
         }
